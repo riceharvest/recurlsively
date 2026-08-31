@@ -213,6 +213,7 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
     // Rebuild the URL -> file index so agents can map pages without parsing JSONL.
     write_page_index(&output, &state).map_err(CrawlError::Output)?;
     write_llms_files(&output).map_err(CrawlError::Output)?;
+    write_link_graph(&output).map_err(CrawlError::Output)?;
 
     let counts = state.counts().map_err(CrawlError::State)?;
     let report = CrawlReport {
@@ -485,6 +486,61 @@ fn path_in_scope(url: &str, include: &GlobFilter, exclude: &GlobFilter) -> bool 
         }
     }
     true
+}
+
+/// Writes `graph.jsonl`: one line per page `{url, inbound, outbound}`.
+/// Inbound counts come from links inside written pages' Markdown bodies.
+fn write_link_graph(output: &OutputRoot) -> Result<(), crate::output::OutputError> {
+    use std::collections::HashMap;
+    let records = output.read_manifest()?;
+    if records.is_empty() {
+        return Ok(());
+    }
+    let mut inbound: HashMap<String, u64> = HashMap::new();
+    let mut outbound: HashMap<String, u64> = HashMap::new();
+    let known: std::collections::HashSet<&str> = records
+        .iter()
+        .map(|record| record.canonical_url.as_str())
+        .collect();
+    for record in &records {
+        let path = output.page_path(std::path::Path::new(&record.output_path))?;
+        let Ok(body) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // count markdown links [text](target) whose target resolves to a known URL
+        let mut out_count = 0u64;
+        for chunk in body.split("](").skip(1) {
+            if let Some(end) = chunk.find(')') {
+                let target = &chunk[..end];
+                if target.starts_with("http") {
+                    out_count += 1;
+                    // normalize: strip fragment
+                    let clean = target.split('#').next().unwrap_or(target);
+                    if known.contains(clean) {
+                        *inbound.entry(clean.to_owned()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        outbound.insert(record.canonical_url.clone(), out_count);
+    }
+    let mut lines: Vec<String> = Vec::with_capacity(records.len());
+    for record in &records {
+        lines.push(
+            serde_json::json!({
+                "url": record.canonical_url,
+                "inbound": inbound.get(record.canonical_url.as_str()).copied().unwrap_or(0),
+                "outbound": outbound.get(record.canonical_url.as_str()).copied().unwrap_or(0),
+            })
+            .to_string(),
+        );
+    }
+    lines.sort();
+    let document = lines.join("\n") + "\n";
+    let tmp = output.root().join(".graph.jsonl.tmp");
+    std::fs::write(&tmp, document.as_bytes())?;
+    std::fs::rename(&tmp, output.root().join("graph.jsonl"))?;
+    Ok(())
 }
 
 /// Writes `llms.txt` (per-page summary index) and `llms-full.txt`
