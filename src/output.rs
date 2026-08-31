@@ -20,6 +20,9 @@ pub struct ManifestRecord {
     pub output_path: String,
     pub bytes: u64,
     pub digest: String,
+    /// Meta/first-paragraph summary for llms.txt and index.md ("" when none).
+    #[serde(default)]
+    pub description: String,
 }
 
 impl ManifestRecord {
@@ -31,6 +34,7 @@ impl ManifestRecord {
         final_url: Option<&str>,
         status_code: Option<u16>,
         output_path: impl Into<String>,
+        description: impl Into<String>,
         content: &[u8],
     ) -> Self {
         Self {
@@ -42,6 +46,7 @@ impl ManifestRecord {
             output_path: output_path.into(),
             bytes: content.len() as u64,
             digest: sha256_hex(content),
+            description: description.into(),
         }
     }
 

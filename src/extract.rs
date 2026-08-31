@@ -29,6 +29,9 @@ impl Default for ExtractLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedPage {
     pub title: String,
+    /// Meta description, og:description, or first body paragraph — for
+    /// llms.txt summaries. Empty when nothing extractable exists.
+    pub description: String,
     pub markdown: String,
     pub links: Vec<String>,
 }
@@ -100,6 +103,7 @@ pub fn extract_html(
     let document = Html::parse_document(html);
     let effective_base = find_document_base(&document, &document_base);
     let title = find_title(&document);
+    let description = find_description(&document);
     let selected = select_content(&document);
 
     let mut state = RenderState {
@@ -129,8 +133,20 @@ pub fn extract_html(
         });
     }
 
+    let description = if description.len() >= 20 {
+        truncate_summary(&description, 150)
+    } else {
+        let first_paragraph = first_paragraph_of(&markdown);
+        if first_paragraph.len() >= 20 {
+            truncate_summary(&first_paragraph, 150)
+        } else {
+            String::new()
+        }
+    };
+
     Ok(ExtractedPage {
         title,
+        description,
         markdown,
         links: state.links,
     })
@@ -176,6 +192,58 @@ fn find_document_base(document: &Html, document_base: &Url) -> Url {
         .filter_map(|element| element.attr("href"))
         .find_map(|href| resolve_http_url(href, document_base))
         .unwrap_or_else(|| document_base.clone())
+}
+
+fn find_description(document: &Html) -> String {
+    for selector_text in [
+        r#"meta[name="description"][content]"#,
+        r#"meta[property="og:description"][content]"#,
+    ] {
+        let selector = Selector::parse(selector_text).expect("static meta selector is valid");
+        if let Some(element) = document.select(&selector).next() {
+            if let Some(content) = element.attr("content") {
+                let cleaned = sanitize_metadata(&collapse_whitespace(content));
+                if !cleaned.is_empty() {
+                    return cleaned;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Cuts at `max` chars, backing up to the last space, appending an ellipsis.
+fn truncate_summary(value: &str, max: usize) -> String {
+    if value.len() <= max {
+        return value.to_owned();
+    }
+    let cut = &value[..max];
+    match cut.rfind(' ') {
+        Some(position) if position > max / 2 => format!("{}\u{2026}", &cut[..position]),
+        _ => format!("{cut}\u{2026}"),
+    }
+}
+
+/// First non-heading, non-empty paragraph line of rendered Markdown.
+fn first_paragraph_of(markdown: &str) -> String {
+    markdown
+        .lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty()
+                && !line.starts_with('#')
+                && !line.starts_with("![")
+                && !line.starts_with('[')
+                && !line.starts_with('|')
+                && !line.starts_with("```")
+                && !line.starts_with("---")
+        })
+        .unwrap_or("")
+        .to_owned()
 }
 
 fn find_title(document: &Html) -> String {

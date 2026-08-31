@@ -203,6 +203,7 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
 
     // Rebuild the URL -> file index so agents can map pages without parsing JSONL.
     write_page_index(&output, &state).map_err(CrawlError::Output)?;
+    write_llms_files(&output).map_err(CrawlError::Output)?;
 
     let counts = state.counts().map_err(CrawlError::State)?;
     let report = CrawlReport {
@@ -298,6 +299,7 @@ async fn process_lease(
                 Some(&fetched.final_url),
                 Some(fetched.status),
                 relative.to_string_lossy().into_owned(),
+                extracted.description.clone(),
                 document.as_bytes(),
             );
             let output = match OutputRoot::setup(lease_output_path(&config)) {
@@ -428,6 +430,76 @@ fn fingerprint_of(start_url: &str, config: &Config) -> String {
 
 /// Writes `index.md`: one line per written page, `url -> pages/xxx.md`,
 /// sorted by URL. Regenerated after every run (including resume no-ops).
+/// Writes `llms.txt` (per-page summary index) and `llms-full.txt`
+/// (whole corpus concatenated). llms-full is capped at 10k pages.
+fn write_llms_files(output: &OutputRoot) -> Result<(), crate::output::OutputError> {
+    let mut records = output.read_manifest()?;
+    if records.is_empty() {
+        return Ok(());
+    }
+    records.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then(a.canonical_url.cmp(&b.canonical_url))
+    });
+
+    const SUMMARY_MAX: usize = 150;
+    let truncate = |value: &str| -> String {
+        if value.len() <= SUMMARY_MAX {
+            value.to_owned()
+        } else {
+            let cut = &value[..SUMMARY_MAX];
+            match cut.rfind(' ') {
+                Some(p) if p > SUMMARY_MAX / 2 => format!("{}\u{2026}", &cut[..p]),
+                _ => format!("{cut}\u{2026}"),
+            }
+        }
+    };
+
+    // llms.txt
+    let mut index = String::with_capacity(records.len() * 160);
+    index.push_str("# recurlsively crawl corpus\n\n");
+    for record in &records {
+        let description = truncate(&record.description);
+        if description.is_empty() {
+            index.push_str(&format!(
+                "- [{}]({})\n",
+                record.canonical_url, record.output_path
+            ));
+        } else {
+            index.push_str(&format!(
+                "- [{}]({}): {}\n",
+                record.canonical_url, record.output_path, description
+            ));
+        }
+    }
+    let index_tmp = output.root().join(".llms.txt.tmp");
+    std::fs::write(&index_tmp, index.as_bytes())?;
+    std::fs::rename(&index_tmp, output.root().join("llms.txt"))?;
+
+    // llms-full.txt (capped)
+    if records.len() > 10_000 {
+        return Ok(());
+    }
+    let mut full = String::with_capacity(records.iter().map(|r| r.bytes as usize + 64).sum());
+    for record in &records {
+        let path = output.page_path(std::path::Path::new(&record.output_path))?;
+        match std::fs::read_to_string(&path) {
+            Ok(body) => {
+                full.push_str(&format!(
+                    "# {}\nurl: {}\n\n{}\n\n---\n\n",
+                    record.canonical_url, record.canonical_url, body
+                ));
+            }
+            Err(_) => continue, // file vanished mid-run; skip rather than fail the run
+        }
+    }
+    let full_tmp = output.root().join(".llms-full.txt.tmp");
+    std::fs::write(&full_tmp, full.as_bytes())?;
+    std::fs::rename(&full_tmp, output.root().join("llms-full.txt"))?;
+    Ok(())
+}
+
 fn write_page_index(
     output: &OutputRoot,
     _state: &StateStore,
@@ -436,22 +508,27 @@ fn write_page_index(
     if records.is_empty() {
         return Ok(());
     }
-    let mut lines: Vec<(String, &str, u32)> = records
+    let mut lines: Vec<(String, &str, u32, &str)> = records
         .iter()
         .map(|record| {
             (
                 record.canonical_url.clone(),
                 record.output_path.as_str(),
                 record.depth,
+                record.description.as_str(),
             )
         })
         .collect();
     lines.sort();
-    let mut document = String::with_capacity(records.len() * 96);
+    let mut document = String::with_capacity(records.len() * 128);
     document.push_str("# Crawl index\n\n");
-    document.push_str("One line per page: `[url](file)` (depth).\n\n");
-    for (url, path, depth) in lines {
-        document.push_str(&format!("- [{url}]({path}) ({depth})\n"));
+    document.push_str("One line per page: `[url](file)` (depth) — summary.\n\n");
+    for (url, path, depth, description) in lines {
+        if description.is_empty() {
+            document.push_str(&format!("- [{url}]({path}) ({depth})\n"));
+        } else {
+            document.push_str(&format!("- [{url}]({path}) ({depth}) — {description}\n"));
+        }
     }
     // index.md lives at the corpus root; pages are relative to it.
     let destination = output.root().join("index.md");

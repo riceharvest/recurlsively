@@ -13,6 +13,7 @@ fn manifest(page_id: i64, path: &str, body: &[u8]) -> ManifestRecord {
         Some("https://example.test/page"),
         Some(200),
         path,
+        "",
         body,
     )
 }
