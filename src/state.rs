@@ -123,7 +123,9 @@ impl fmt::Display for StateError {
             Self::LeaseConflict(page_id) => write!(formatter, "lease conflict for page {page_id}"),
             Self::ConfigMismatch { expected, actual } => write!(
                 formatter,
-                "config fingerprint mismatch: stored `{actual}`, requested `{expected}`"
+                "output directory was created with a different configuration \
+                 (stored `{actual}`, requested `{expected}`); re-run with --fresh to start over, \
+                 or use a different --output directory"
             ),
         }
     }
