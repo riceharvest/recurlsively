@@ -6,6 +6,7 @@ pub mod crawler;
 pub mod extract;
 pub mod fetch;
 pub mod output;
+pub mod resolver;
 pub mod robots;
 pub mod sitemap;
 pub mod state;

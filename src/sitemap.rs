@@ -49,7 +49,7 @@ pub async fn load_sitemap(
         // one level of sitemapindex: fetch each child, bounded
         let mut out = Vec::new();
         for child in urls.iter().take(32) {
-            if !child.starts_with(origin) {
+            if !same_origin_url(child, origin) {
                 continue;
             }
             if let Ok(child_fetched) = fetcher.get(child, SITEMAP_MAX_BODY).await {
@@ -58,7 +58,7 @@ pub async fn load_sitemap(
                     if out.len() >= SITEMAP_MAX_URLS {
                         break;
                     }
-                    if url.starts_with(origin) {
+                    if same_origin_url(&url, origin) {
                         out.push(url);
                     }
                 }
@@ -68,9 +68,21 @@ pub async fn load_sitemap(
     }
     Ok(urls
         .into_iter()
-        .filter(|u| u.starts_with(origin))
+        .filter(|u| same_origin_url(u, origin))
         .take(SITEMAP_MAX_URLS)
         .collect())
+}
+
+/// True when `candidate` is an http(s) URL on exactly `origin`
+/// (scheme + host + effective port), not merely a string prefix.
+fn same_origin_url(candidate: &str, origin: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(candidate) else {
+        return false;
+    };
+    let Ok(expected) = url::Url::parse(origin) else {
+        return false;
+    };
+    parsed.origin() == expected.origin()
 }
 
 /// Extracts `<loc>` values without a full XML dependency stack.

@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::net::{IpAddr, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::url_policy::{self, IpSafety};
@@ -114,6 +115,9 @@ impl Fetcher {
             .user_agent(user_agent)
             .timeout(timeout)
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(crate::resolver::SafeResolver::new(
+                allow_private_network,
+            )))
             .build()
             .expect("reqwest client with valid configuration");
         Self {
