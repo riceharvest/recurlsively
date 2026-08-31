@@ -19,3 +19,9 @@ sha2 = "0.10"
 url = "2.5"
 
 [workspace]
+
+[dependencies]
+ego-tree = "0.11.0"
+htmd = "0.5.5"
+scraper = "0.27.0"
+url = "2.5.8"

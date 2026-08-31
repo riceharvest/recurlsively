@@ -1,8 +1,6 @@
-//! Configuration and command-line surface for `recurlsively`.
-//!
-//! Crawling and durable output components are intentionally not exposed until
-//! they have a real implementation and tests.
+//! recurlsively — a secure-by-default deterministic Markdown snapshotter for AI agents.
 
 pub mod cli;
 pub mod config;
+pub mod extract;
 pub mod url_policy;
