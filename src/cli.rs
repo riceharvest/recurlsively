@@ -19,6 +19,11 @@ pub enum ParseOutcome {
     Help(String),
     Version(String),
     Update,
+    Search {
+        directory: PathBuf,
+        query: String,
+        json: bool,
+    },
     Run(Cli),
 }
 
@@ -93,6 +98,30 @@ where
         }
         if !positional_only && argument == "--update" {
             return Ok(ParseOutcome::Update);
+        }
+        if !positional_only && argument == "search" && start_url.is_none() {
+            // recurlsively search <dir> <query...> [--json]
+            let directory = arguments
+                .next()
+                .ok_or_else(|| CliError("search requires an output directory".to_owned()))?;
+            let mut query_parts = Vec::new();
+            let mut json = false;
+            for rest in arguments.by_ref() {
+                if rest == "--json" {
+                    json = true;
+                } else {
+                    query_parts.push(rest);
+                }
+            }
+            let query = query_parts.join(" ");
+            if query.is_empty() {
+                return Err(CliError("search requires a query".to_owned()));
+            }
+            return Ok(ParseOutcome::Search {
+                directory: PathBuf::from(directory),
+                query,
+                json,
+            });
         }
         if !positional_only && argument == "--" {
             positional_only = true;

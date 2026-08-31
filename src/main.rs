@@ -34,6 +34,27 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Ok(ParseOutcome::Search {
+            directory,
+            query,
+            json,
+        }) => match recurlsively::search::search(&directory, &query) {
+            Ok(hits) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&hits).unwrap_or_else(|_| "[]".to_owned())
+                    );
+                } else {
+                    print!("{}", recurlsively::search::format_text(&hits, &directory));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("recurlsively: {error}");
+                ExitCode::from(2)
+            }
+        },
         Ok(ParseOutcome::Run(cli)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

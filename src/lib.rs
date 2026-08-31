@@ -8,6 +8,7 @@ pub mod fetch;
 pub mod output;
 pub mod resolver;
 pub mod robots;
+pub mod search;
 pub mod sitemap;
 pub mod state;
 pub mod update;
