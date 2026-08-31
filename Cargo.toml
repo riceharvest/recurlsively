@@ -1,0 +1,17 @@
+[package]
+name = "recurlsively"
+version = "0.1.0"
+edition = "2024"
+description = "A secure-by-default deterministic Markdown snapshotter for AI agents."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+rust-version = "1.85"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "recurlsively"
+path = "src/main.rs"
+
+[workspace]
