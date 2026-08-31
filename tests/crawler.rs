@@ -324,10 +324,7 @@ async fn delayed_retries_are_awaited_not_abandoned() {
     // Server 429s the first request, Retry-After: 1s. Before the fix, the run
     // loop exited while the page was delayed and never retried it.
     let mut routes = HashMap::new();
-    routes.insert(
-        "/".to_owned(),
-        (200, vec![("body", page("retry", &[]))]),
-    );
+    routes.insert("/".to_owned(), (200, vec![("body", page("retry", &[]))]));
     let fixture = Fixture::start(routes);
     let output = std::env::temp_dir().join(format!(
         "recurlsively-retrywait-{}-{}",
@@ -335,8 +332,13 @@ async fn delayed_retries_are_awaited_not_abandoned() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let report = crawler::run(&config, &start).await.expect("crawl completes");
+    let report = crawler::run(&config, &start)
+        .await
+        .expect("crawl completes");
     assert_eq!(report.pages_written, 1);
-    assert_eq!(report.pages_pending, 0, "no page left behind in delayed state");
+    assert_eq!(
+        report.pages_pending, 0,
+        "no page left behind in delayed state"
+    );
     let _ = std::fs::remove_dir_all(&output);
 }
