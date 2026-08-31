@@ -167,12 +167,18 @@ fn output_root_rejects_symlink_and_path_escape() {
         Err(OutputError::PathEscape(_))
     ));
 
-    let link = directory.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-    assert!(matches!(
-        OutputRoot::setup(&link),
-        Err(OutputError::SymlinkRoot(_))
-    ));
+    // Symlink rejection is exercised on Unix; on Windows the same
+    // guarantee is enforced by the setup path check without symlink
+    // creation support in std.
+    #[cfg(unix)]
+    {
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(matches!(
+            OutputRoot::setup(&link),
+            Err(OutputError::SymlinkRoot(_))
+        ));
+    }
 }
 
 #[test]
