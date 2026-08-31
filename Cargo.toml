@@ -14,4 +14,8 @@ path = "src/lib.rs"
 name = "recurlsively"
 path = "src/main.rs"
 
+[dependencies]
+sha2 = "0.10"
+url = "2.5"
+
 [workspace]
