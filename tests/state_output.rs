@@ -133,7 +133,11 @@ fn state_config_fingerprint_survives_reopen_and_detects_mismatch() {
     let state = StateStore::open(&path).unwrap();
     assert_eq!(state.config_fingerprint().unwrap().as_deref(), Some("abc"));
     let mismatch = state.ensure_config_fingerprint("def").unwrap_err();
-    assert!(mismatch.to_string().contains("fingerprint mismatch"));
+    let message = mismatch.to_string();
+    assert!(
+        message.contains("different configuration") && message.contains("--fresh"),
+        "mismatch error should explain the fix, got: {message}"
+    );
 }
 
 #[test]
