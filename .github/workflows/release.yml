@@ -131,6 +131,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Replace any existing release for this tag (idempotent re-publish)
+          gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          sleep 5
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "recurlsively $GITHUB_REF_NAME" \
