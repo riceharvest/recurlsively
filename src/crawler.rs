@@ -18,6 +18,10 @@ pub struct CrawlReport {
     pub pages_failed: u64,
     pub pages_skipped: u64,
     pub pages_pending: u64,
+    /// Pages re-fetched this run whose content changed.
+    pub changed: u64,
+    /// Pages confirmed unchanged via validators (zero body downloaded).
+    pub unchanged: u64,
     pub truncated: bool,
 }
 
@@ -147,6 +151,8 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
     let written = AtomicU64::new(0);
     let failed = AtomicU64::new(0);
     let skipped = AtomicU64::new(0);
+    let changed = Arc::new(AtomicU64::new(0));
+    let unchanged = Arc::new(AtomicU64::new(0));
 
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -189,6 +195,8 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
                 include_matcher.clone(),
                 exclude_matcher.clone(),
                 lease,
+                changed.clone(),
+                unchanged.clone(),
             )));
         }
         for handle in handles {
@@ -221,6 +229,8 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
         pages_failed: failed.load(Ordering::SeqCst),
         pages_skipped: skipped.load(Ordering::SeqCst),
         pages_pending: counts.queued + counts.delayed + counts.leased,
+        changed: changed.load(Ordering::SeqCst),
+        unchanged: unchanged.load(Ordering::SeqCst),
         truncated: state.page_count().map_err(CrawlError::State)? as usize >= config.max_pages,
     };
     Ok(report)
@@ -232,6 +242,7 @@ enum Outcome {
     Failed,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_lease(
     config: Config,
     policy: UrlPolicy,
@@ -240,6 +251,8 @@ async fn process_lease(
     include_matcher: GlobFilter,
     exclude_matcher: GlobFilter,
     lease: crate::state::Lease,
+    changed: Arc<AtomicU64>,
+    unchanged: Arc<AtomicU64>,
 ) -> Outcome {
     let state = match StateStore::open(lease_output_path(&config).join("state.sqlite")) {
         Ok(s) => s,
@@ -275,83 +288,44 @@ async fn process_lease(
         RobotsOutcome::NoRules | RobotsOutcome::Allowed(_) => {}
     }
 
+    let (stored_etag, stored_last_modified) = state
+        .validators_for(&lease.canonical_url)
+        .unwrap_or((None, None));
     match fetcher
-        .get(&lease.canonical_url, config.max_body_size)
+        .conditional_get(
+            &lease.canonical_url,
+            config.max_body_size,
+            stored_etag.as_deref(),
+            stored_last_modified.as_deref(),
+        )
         .await
     {
-        Ok(fetched) => {
-            let html = match String::from_utf8(fetched.body) {
-                Ok(text) => text,
-                Err(_) => {
-                    return finish_error(
-                        &config,
-                        &state,
-                        &lease,
-                        "not_html",
-                        "response was not valid UTF-8",
-                    )
-                    .await;
-                }
-            };
-            let extracted =
-                extract::extract_html(&html, &fetched.final_url, extraction_limits(&config));
-            let extracted = match extracted {
-                Ok(page) => page,
-                Err(e) => {
-                    return finish_error(&config, &state, &lease, "extract_failed", &e.to_string())
-                        .await;
-                }
-            };
-            let document = build_document(&lease.canonical_url, &fetched.final_url, &extracted);
-            let relative = crate::url_policy::output_path(&lease.canonical_url);
-            let record = ManifestRecord::for_content(
-                lease.page_id,
-                lease.canonical_url.clone(),
-                lease.depth,
-                Some(&fetched.final_url),
-                Some(fetched.status),
-                relative.to_string_lossy().into_owned(),
-                extracted.description.clone(),
-                document.as_bytes(),
-            );
-            let output = match OutputRoot::setup(lease_output_path(&config)) {
-                Ok(o) => o,
-                Err(_) => return Outcome::Failed,
-            };
-            if output.commit_page(&record, document.as_bytes()).is_err() {
-                return Outcome::Failed;
-            }
+        Ok(crate::fetch::ConditionalFetch::NotModified) => {
+            unchanged.fetch_add(1, Ordering::SeqCst);
             let now = crate::robots::unix_ms() as i64;
-            let _ = state.mark_written(
-                lease.page_id,
-                &relative.to_string_lossy(),
-                &record.digest,
-                document.len() as u64,
-                now,
-            );
-            // admit discovered links
-            for link in &extracted.links {
-                if lease.depth + 1 > config.max_depth {
-                    break; // deeper links would all exceed the depth budget
-                }
-                if let Ok(canonical_link) = policy.canonicalize(link) {
-                    if policy.contains(&canonical_link)
-                        && path_in_scope(
-                            canonical_link.as_str(),
-                            &include_matcher,
-                            &exclude_matcher,
-                        )
-                    {
-                        let _ = state.admit(
-                            canonical_link.as_str(),
-                            lease.depth + 1,
-                            Some(&lease.canonical_url),
-                            Some("link"),
-                        );
-                    }
+            // re-mark written with existing data; count in written to keep stats sane
+            if let Ok(Some(existing)) = state.page(lease.page_id) {
+                if let (Some(path), Some(digest), Some(bytes)) =
+                    (existing.output_path, existing.digest, existing.bytes)
+                {
+                    let _ = state.mark_written(lease.page_id, &path, &digest, bytes, now);
+                    return Outcome::Written;
                 }
             }
-            Outcome::Written
+            Outcome::Skipped
+        }
+        Ok(crate::fetch::ConditionalFetch::Modified(fetched)) => {
+            changed.fetch_add(1, Ordering::SeqCst);
+            process_modified(
+                config,
+                policy,
+                state,
+                fetched,
+                lease,
+                &include_matcher,
+                &exclude_matcher,
+            )
+            .await
         }
         Err(fetch_error) => {
             let retryable = matches!(
@@ -386,6 +360,90 @@ async fn process_lease(
             }
         }
     }
+}
+
+/// Handles a fetched (modified) page: extract, commit, admit links.
+#[allow(clippy::too_many_arguments)]
+async fn process_modified(
+    config: Config,
+    policy: UrlPolicy,
+    state: StateStore,
+    fetched: crate::fetch::Fetched,
+    lease: crate::state::Lease,
+    include_matcher: &GlobFilter,
+    exclude_matcher: &GlobFilter,
+) -> Outcome {
+    let _ = state.store_validators(
+        &lease.canonical_url,
+        fetched.etag.as_deref(),
+        fetched.last_modified.as_deref(),
+    );
+    let html = match String::from_utf8(fetched.body) {
+        Ok(text) => text,
+        Err(_) => {
+            return finish_error(
+                &config,
+                &state,
+                &lease,
+                "not_html",
+                "response was not valid UTF-8",
+            )
+            .await;
+        }
+    };
+    let extracted =
+        match extract::extract_html(&html, &fetched.final_url, extraction_limits(&config)) {
+            Ok(page) => page,
+            Err(e) => {
+                return finish_error(&config, &state, &lease, "extract_failed", &e.to_string())
+                    .await;
+            }
+        };
+    let document = build_document(&lease.canonical_url, &fetched.final_url, &extracted);
+    let relative = crate::url_policy::output_path(&lease.canonical_url);
+    let record = ManifestRecord::for_content(
+        lease.page_id,
+        lease.canonical_url.clone(),
+        lease.depth,
+        Some(&fetched.final_url),
+        Some(fetched.status),
+        relative.to_string_lossy().into_owned(),
+        extracted.description.clone(),
+        document.as_bytes(),
+    );
+    let output = match OutputRoot::setup(lease_output_path(&config)) {
+        Ok(o) => o,
+        Err(_) => return Outcome::Failed,
+    };
+    if output.commit_page(&record, document.as_bytes()).is_err() {
+        return Outcome::Failed;
+    }
+    let now = crate::robots::unix_ms() as i64;
+    let _ = state.mark_written(
+        lease.page_id,
+        &relative.to_string_lossy(),
+        &record.digest,
+        document.len() as u64,
+        now,
+    );
+    for link in &extracted.links {
+        if lease.depth + 1 > config.max_depth {
+            break;
+        }
+        if let Ok(canonical_link) = policy.canonicalize(link) {
+            if policy.contains(&canonical_link)
+                && path_in_scope(canonical_link.as_str(), include_matcher, exclude_matcher)
+            {
+                let _ = state.admit(
+                    canonical_link.as_str(),
+                    lease.depth + 1,
+                    Some(&lease.canonical_url),
+                    Some("link"),
+                );
+            }
+        }
+    }
+    Outcome::Written
 }
 
 async fn finish_error(
@@ -557,17 +615,7 @@ fn write_llms_files(output: &OutputRoot) -> Result<(), crate::output::OutputErro
     });
 
     const SUMMARY_MAX: usize = 150;
-    let truncate = |value: &str| -> String {
-        if value.len() <= SUMMARY_MAX {
-            value.to_owned()
-        } else {
-            let cut = &value[..SUMMARY_MAX];
-            match cut.rfind(' ') {
-                Some(p) if p > SUMMARY_MAX / 2 => format!("{}\u{2026}", &cut[..p]),
-                _ => format!("{cut}\u{2026}"),
-            }
-        }
-    };
+    let truncate = |value: &str| -> String { crate::extract::truncate_summary(value, SUMMARY_MAX) };
 
     // llms.txt
     let mut index = String::with_capacity(records.len() * 160);

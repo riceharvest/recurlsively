@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -205,6 +205,15 @@ impl StateStore {
             return Ok(());
         }
         let transaction = connection.transaction()?;
+        // v1 -> v2: conditional-request columns for change-aware re-crawls.
+        // Only applies to an existing v1 database; fresh databases get the
+        // columns from CREATE TABLE below.
+        if current == 1 {
+            transaction.execute_batch(
+                "ALTER TABLE pages ADD COLUMN etag TEXT;
+                 ALTER TABLE pages ADD COLUMN last_modified TEXT;",
+            )?;
+        }
         transaction.execute_batch(&format!(
             "CREATE TABLE IF NOT EXISTS pages (
                 page_id INTEGER PRIMARY KEY,
@@ -605,6 +614,37 @@ impl StateStore {
             [now_ms],
         )?;
         Ok(changed as u64)
+    }
+
+    /// Stored validators for conditional re-fetch of one URL.
+    pub fn validators_for(
+        &self,
+        canonical_url: &str,
+    ) -> Result<(Option<String>, Option<String>), StateError> {
+        let connection = self.lock()?;
+        let row: Option<(Option<String>, Option<String>)> = connection
+            .query_row(
+                "SELECT etag, last_modified FROM pages WHERE canonical_url = ?1",
+                [canonical_url],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.unwrap_or((None, None)))
+    }
+
+    /// Persists validators after a successful (non-304) fetch.
+    pub fn store_validators(
+        &self,
+        canonical_url: &str,
+        etag: Option<&str>,
+        last_modified: Option<&str>,
+    ) -> Result<(), StateError> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE pages SET etag = ?1, last_modified = ?2 WHERE canonical_url = ?3",
+            params![etag, last_modified, canonical_url],
+        )?;
+        Ok(())
     }
 
     /// Minimum `next_eligible_at` across delayed pages, or 0 when none.

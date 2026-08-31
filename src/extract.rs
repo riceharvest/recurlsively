@@ -216,15 +216,20 @@ fn collapse_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Cuts at `max` chars, backing up to the last space, appending an ellipsis.
-fn truncate_summary(value: &str, max: usize) -> String {
+/// Cuts at `max` bytes without splitting a UTF-8 char, backing up to the
+/// last space, appending an ellipsis.
+pub fn truncate_summary(value: &str, max: usize) -> String {
     if value.len() <= max {
         return value.to_owned();
     }
-    let cut = &value[..max];
-    match cut.rfind(' ') {
-        Some(position) if position > max / 2 => format!("{}\u{2026}", &cut[..position]),
-        _ => format!("{cut}\u{2026}"),
+    let mut cut = max;
+    while cut > 0 && !value.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let slice = &value[..cut];
+    match slice.rfind(' ') {
+        Some(position) if position > cut / 2 => format!("{}\u{2026}", &slice[..position]),
+        _ => format!("{slice}\u{2026}"),
     }
 }
 

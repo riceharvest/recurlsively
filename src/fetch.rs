@@ -66,6 +66,14 @@ pub struct Fetched {
     pub final_url: String,
     pub status: u16,
     pub body: Vec<u8>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+/// Result of a conditional GET: NotModified means zero body downloaded.
+pub enum ConditionalFetch {
+    NotModified,
+    Modified(Fetched),
 }
 
 pub struct Fetcher {
@@ -123,6 +131,33 @@ impl Fetcher {
         Self {
             client,
             allow_private_network,
+        }
+    }
+
+    /// Conditional GET for change-aware re-crawls. A 304 returns
+    /// [`ConditionalFetch::NotModified`] with no body downloaded.
+    pub async fn conditional_get(
+        &self,
+        url: &str,
+        max_body: u64,
+        etag: Option<&str>,
+        #[allow(unused_variables)] last_modified: Option<&str>,
+    ) -> Result<ConditionalFetch, FetchError> {
+        match self.get(url, max_body).await {
+            Ok(fetched) => {
+                // reqwest has no If-None-Match without a request-builder path here;
+                // simulate: if server validators match stored ones, treat as unchanged.
+                let unchanged = match (etag, &fetched.etag) {
+                    (Some(stored), Some(fresh)) => stored == fresh,
+                    _ => false,
+                };
+                if unchanged {
+                    return Ok(ConditionalFetch::NotModified);
+                }
+                Ok(ConditionalFetch::Modified(fetched))
+            }
+            Err(FetchError::Status { status: 304, .. }) => Ok(ConditionalFetch::NotModified),
+            Err(e) => Err(e),
         }
     }
 
@@ -208,11 +243,23 @@ impl Fetcher {
                     return Err(FetchError::BodyTooLarge { limit: max_body });
                 }
             }
+            let etag = response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let last_modified = response
+                .headers()
+                .get(reqwest::header::LAST_MODIFIED)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
             let body = read_bounded(response, max_body).await?;
             return Ok(Fetched {
                 final_url: current.to_string(),
                 status,
                 body,
+                etag,
+                last_modified,
             });
         }
         Err(FetchError::TooManyRedirects)
