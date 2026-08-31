@@ -1,6 +1,6 @@
 [package]
 name = "recurlsively"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A secure-by-default deterministic Markdown snapshotter for AI agents."
 license = "MIT OR Apache-2.0"

@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "recurlsively"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ego-tree",
  "flate2",
