@@ -20,7 +20,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.ps1 | iex
 ```
 
-Already installed? Self-update from the latest release (v0.1.2+; first run after v0.1.2):
+Already installed? Self-update (v0.1.2+):
 
 ```sh
 recurlsively --update
@@ -82,6 +82,8 @@ recurlsively-out/
 
 ### Multiple start URLs
 
+Every flag applies to every start URL.
+
 ```bash
 # one corpus per site (default)
 recurlsively crawl https://docs.a.com https://docs.b.com -o ./out
@@ -93,13 +95,15 @@ recurlsively crawl https://docs.a.com https://docs.b.com -o ./out --merge
 
 All flags apply to every start URL.
 
-### Relevance crawl
+### Relevance crawl — save only what matters
 
 ```bash
 # only save pages matching the query; irrelevant pages are traversed but not saved
 recurlsively crawl https://docs.example.com -o out --for "rate limits" --max-pages 100
-# strict: prune irrelevant pages AND their links
+# strict: prune irrelevant pages AND their links (fast, minimal corpus)
 recurlsively crawl https://docs.example.com -o out --for "rate limits" --for-prune
+# multiple queries match any of them
+recurlsively crawl https://docs.example.com -o out --for "rate limits" --for "authentication"
 ```
 
 ### Search the corpus
@@ -127,7 +131,24 @@ Every Markdown file carries front matter with `url`, `final_url`, and
 input: it came from the network.
 
 Exit codes: `0` complete (including a resume no-op), `1` partial/truncated,
-`2` usage error, `3` fatal startup failure.
+`2` usage error, `3` fatal startup failure. Multi-URL JSON reports include a
+per-URL breakdown plus totals; search text output tags combined-ranking hits
+with the queries that matched them (`[q1,q2]`).
+
+## Feature summary
+
+| Feature | Command |
+|---|---|
+| Snapshot a domain | `recurlsively crawl <url> -o out` |
+| Multiple sites, separate corpora | `recurlsively crawl url1 url2 -o out` |
+| Multiple sites, one corpus | `... --merge` |
+| Only relevant pages | `... --for "query"` |
+| Strict relevance pruning | `... --for "query" --for-prune` |
+| Path filters | `... --include "/docs/**" --exclude "/blog/**"` |
+| Scored search | `recurlsively search out "query"` |
+| Multi-query search | `recurlsively search out "q1, q2" [--mode separate\|all]` |
+| JSON everywhere | `--report json` (crawl), `--json` (search) |
+| Self-update | `recurlsively --update` |
 
 ## Security model
 
