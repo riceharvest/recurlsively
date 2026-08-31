@@ -2,46 +2,95 @@
 
 `recurlsively` is a full-Rust, local, zero-runtime, secure-by-default deterministic Markdown snapshotter for AI agents.
 
-## Status
+One command recursively crawls an entire domain and writes one grep-friendly
+Markdown file per page, so an agent can run it once and then scan the corpus
+for relevant information — no browser, no runtime, no API keys.
 
-This repository contains the first CLI/configuration slice. The command validates its arguments and configuration, and exposes stable help/version output. The crawl engine, Markdown extraction, durable scheduler, SQLite state, and snapshot output are planned but not implemented yet.
+## Install
 
-The MVP target is HTTP(S) only: no JavaScript, browser automation, authentication, or asset downloading. The default policy is exact-origin crawling with private and special network targets blocked unless explicitly opted into for a trusted local fixture or local documentation.
+> Available from the first tagged release (v0.1.0). See
+> [docs/install.md](docs/install.md) for manual and per-OS instructions.
+
+macOS / Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.ps1 | iex
+```
 
 ## Usage
 
 ```text
-recurlsively [crawl] <START_URL>
+recurlsively [crawl] <START_URL> [OPTIONS]
 ```
 
-Inspect the current interface:
+Crawl a domain and scan the output:
 
 ```bash
-cargo run -- --help
-cargo run -- --version
-cargo test
+recurlsively https://docs.example.com -o ./docs-snap
+grep -ril "rate limits" docs-snap/pages/
 ```
 
-A successful invocation currently validates the request and reports that the crawl engine is not implemented. It does not fetch a URL.
+Key options (see `--help` for all):
 
-## Planned install
+| Flag | Default | Meaning |
+|---|---|---|
+| `-o, --output` | `./recurlsively-out` | output directory |
+| `--max-depth` | `3` | link depth from the start URL |
+| `--max-pages` | `1000` | hard page budget |
+| `--concurrency` | `8` | parallel fetches |
+| `--delay` | `250ms` | per-host politeness delay |
+| `--max-body-size` | `10MiB` | hard per-page body limit |
+| `--query-mode` | `drop` | drop query strings (dedupes tracking URLs) |
+| `--sitemap` | `auto` | seed the frontier from sitemap.xml |
+| `--include-subdomains` | off | allow `sub.<start-host>` |
+| `--ignore-robots` | off | bypass robots.txt (your responsibility) |
+| `--allow-private-network` | off | allow localhost/private IPs (trusted targets only) |
 
-> Not released yet. After the first release, the planned one-line install is:
->
-> `cargo install recurlsively`
+## Output layout
 
-Prebuilt release binaries and checksum-verifying installers are a later release requirement. No binaries are committed to this repository.
+```
+recurlsively-out/
+├── pages/<sha256>.md   # one Markdown file per page, YAML front matter
+├── manifest.jsonl      # one JSON line per written page (url, depth, digest, path)
+├── errors.jsonl        # one JSON line per terminal failure with a reason
+└── state.sqlite        # durable frontier; re-running the same command resumes
+```
+
+Every Markdown file carries front matter with `url`, `final_url`, and
+`title`, and ends with exactly one newline. Treat the content as untrusted
+input: it came from the network.
+
+## Security model
+
+- Exact-origin crawling by default; subdomains and cross-origin redirects
+  are opt-in or rejected.
+- Private, loopback, link-local, and special-use IP ranges are refused
+  unless `--allow-private-network` is passed explicitly.
+- Redirects are followed manually, hop by hop, with the same-origin policy
+  re-checked on every hop (max 10).
+- Bodies are streamed with hard size limits; retries honor `Retry-After`.
+- robots.txt is fetched and honored by default; 5xx/network failure fails
+  closed.
+- No JavaScript rendering, cookies, or authentication. Static HTML/XHTML
+  only.
 
 ## Design commitments
 
 - Deterministic Markdown snapshots with explicit, documented policies.
-- Secure defaults: exact origin, bounded work, bounded response/body budgets, and private-network blocking.
+- Secure defaults: exact origin, bounded work, bounded budgets, private-network blocking.
 - Local execution with no runtime service dependency.
-- Durable scheduling and output state backed by SQLite in a later slice.
+- Durable scheduling and output state backed by SQLite; interrupted crawls resume.
 - Cross-platform support for Linux, macOS, and Windows.
 - Dual licensing under MIT OR Apache-2.0.
 
-See [the normative specification](docs/spec.md) and [the architecture](docs/architecture.md). Contributions should preserve those contracts rather than infer behavior from a competitor.
+See [the normative specification](docs/spec.md), [the architecture](docs/architecture.md),
+and [install docs](docs/install.md).
 
 ## License
 
