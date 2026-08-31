@@ -76,7 +76,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ env.BIN }}" "$DIR/"
           cp README.md LICENSE-MIT "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"
-          sha256sum "${DIR}.tar.gz" | tee artifact-sha256.txt
+          sha256sum "${DIR}.tar.gz" | tee "artifact-sha256-${{ matrix.target }}.txt"
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
@@ -88,7 +88,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ env.BIN }}.exe" "$dir/"
           Copy-Item README.md, LICENSE-MIT "$dir/"
           Compress-Archive -Path "$dir" -DestinationPath "$dir.zip"
-          (Get-FileHash "$dir.zip" -Algorithm SHA256).Hash.ToLower() + "  $dir.zip" | Out-File -Encoding ascii artifact-sha256.txt
+          (Get-FileHash "$dir.zip" -Algorithm SHA256).Hash.ToLower() + "  $dir.zip" | Out-File -Encoding ascii "artifact-sha256-${{ matrix.target }}.txt"
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -97,7 +97,7 @@ jobs:
           path: |
             *.tar.gz
             *.zip
-            artifact-sha256.txt
+            artifact-sha256-*.txt
           retention-days: 90
 
   release:
@@ -114,9 +114,15 @@ jobs:
       - name: Assemble SHA256SUMS and validate
         run: |
           cd dist
-          cat artifact-sha256.txt > SHA256SUMS
-          ls *.tar.gz *.zip >> SHA256SUMS-expected 2>/dev/null || true
-          rm artifact-sha256.txt
+          cat artifact-sha256-*.txt > SHA256SUMS
+          rm artifact-sha256-*.txt
+          # fail unless every archive is covered by exactly one checksum line
+          LINES=$(wc -l < SHA256SUMS)
+          ARCHIVES=$(ls *.tar.gz *.zip | wc -l)
+          if [ "$LINES" -ne "$ARCHIVES" ]; then
+            echo "::error title=Checksum coverage mismatch::SHA256SUMS has $LINES lines for $ARCHIVES archives"
+            exit 1
+          fi
           sort SHA256SUMS -o SHA256SUMS
           sha256sum -c SHA256SUMS
           echo "All release asset checksums validated."
