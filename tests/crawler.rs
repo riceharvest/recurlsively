@@ -149,7 +149,7 @@ async fn crawl_engine_captures_linked_pages_and_records_dead_links() {
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
 
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl succeeds");
     assert_eq!(report[0].report.pages_written, 2, "home + /a written");
@@ -188,7 +188,7 @@ async fn robots_disallow_is_respected() {
     ));
     let (mut config, start) = test_config(output.clone(), &fixture.url("/"));
     config.sitemap = SitemapMode::Off;
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl succeeds");
     assert_eq!(report[0].report.pages_written, 1);
@@ -212,7 +212,7 @@ async fn body_limit_is_enforced_as_terminal_error() {
     ));
     let (mut config, start) = test_config(output, &fixture.url("/"));
     config.max_body_size = 1024;
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl completes");
     assert_eq!(report[0].report.pages_written, 0);
@@ -237,7 +237,7 @@ async fn same_origin_redirect_is_followed_and_deduplicated() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output, &fixture.url("/start"));
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl completes");
     assert_eq!(report[0].report.pages_written, 1, "only /final written");
@@ -261,13 +261,13 @@ async fn resume_of_completed_crawl_is_not_an_error() {
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
 
-    let first = crawler::run(&config, &[start.clone()])
+    let first = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("first run");
     assert_eq!(first[0].report.pages_written, 1);
 
     // Second run: everything already written — must not count as failure.
-    let second = crawler::run(&config, &[start.clone()])
+    let second = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("resume run");
     assert_eq!(second[0].report.pages_written, 0);
@@ -291,7 +291,7 @@ async fn crawl_writes_index_md_mapping_urls_to_files() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let _report = crawler::run(&config, &[start.clone()])
+    let _report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl succeeds");
 
@@ -325,7 +325,7 @@ async fn robots_served_as_text_plain_does_not_fail_closed() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl must succeed");
     assert_eq!(
@@ -348,7 +348,7 @@ async fn delayed_retries_are_awaited_not_abandoned() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let report = crawler::run(&config, &[start.clone()])
+    let report = crawler::run(&config, std::slice::from_ref(&start))
         .await
         .expect("crawl completes");
     assert_eq!(report[0].report.pages_written, 1);

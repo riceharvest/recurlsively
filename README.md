@@ -80,11 +80,37 @@ recurlsively-out/
 └── state.sqlite       # durable frontier; re-running the same command resumes
 ```
 
+### Multiple start URLs
+
+```bash
+# one corpus per site (default)
+recurlsively crawl https://docs.a.com https://docs.b.com -o ./out
+#   -> out/docs.a.com/..., out/docs.b.com/...
+
+# one merged corpus, deduped across starts
+recurlsively crawl https://docs.a.com https://docs.b.com -o ./out --merge
+```
+
+All flags apply to every start URL.
+
+### Relevance crawl
+
+```bash
+# only save pages matching the query; irrelevant pages are traversed but not saved
+recurlsively crawl https://docs.example.com -o out --for "rate limits" --max-pages 100
+# strict: prune irrelevant pages AND their links
+recurlsively crawl https://docs.example.com -o out --for "rate limits" --for-prune
+```
+
 ### Search the corpus
 
 ```bash
 recurlsively search ./docs-snap "rate limits"
 recurlsively search ./docs-snap "rate limits" --json
+# multiple queries: combined ranking tagged [q1,q2], or per-query lists
+recurlsively search ./docs-snap "rate limits, authentication"
+recurlsively search ./docs-snap "rate limits, authentication" --mode separate
+recurlsively search ./docs-snap "rate limits, authentication" --mode all
 ```
 
 Title matches rank 10x, headings 4x, body 1x. All query terms must appear.

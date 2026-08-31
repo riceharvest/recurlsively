@@ -23,6 +23,7 @@ pub enum ParseOutcome {
         directory: PathBuf,
         query: String,
         json: bool,
+        mode: String,
     },
     Run(Cli),
 }
@@ -106,21 +107,39 @@ where
                 .ok_or_else(|| CliError("search requires an output directory".to_owned()))?;
             let mut query_parts = Vec::new();
             let mut json = false;
+            let mut mode = "combined".to_owned();
+            let mut pending_mode = false;
             for rest in arguments.by_ref() {
-                if rest == "--json" {
+                if pending_mode {
+                    mode = rest;
+                    pending_mode = false;
+                } else if rest == "--json" {
                     json = true;
+                } else if let Some(value) = rest.strip_prefix("--mode=") {
+                    mode = value.to_owned();
+                } else if rest == "--mode" {
+                    pending_mode = true;
                 } else {
                     query_parts.push(rest);
                 }
+            }
+            if pending_mode {
+                return Err(CliError("--mode requires a value".to_owned()));
             }
             let query = query_parts.join(" ");
             if query.is_empty() {
                 return Err(CliError("search requires a query".to_owned()));
             }
+            if !matches!(mode.as_str(), "combined" | "separate" | "all") {
+                return Err(CliError(format!(
+                    "invalid --mode `{mode}` (expected combined, separate, or all)"
+                )));
+            }
             return Ok(ParseOutcome::Search {
                 directory: PathBuf::from(directory),
                 query,
                 json,
+                mode,
             });
         }
         if !positional_only && argument == "--" {
@@ -138,7 +157,7 @@ where
         }
     }
 
-    let mut start_urls = start_urls.ok_or_else(|| CliError("missing START_URL".to_owned()))?;
+    let start_urls = start_urls.ok_or_else(|| CliError("missing START_URL".to_owned()))?;
     if start_urls.len() > 1 && config.merge_outputs {
         // cross-origin merge is fine; same-origin scope is per-URL below
     }

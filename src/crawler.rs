@@ -181,6 +181,18 @@ pub async fn run_single(
         }
     }
 
+    let for_terms: Vec<Vec<String>> = config
+        .for_queries
+        .iter()
+        .map(|query| {
+            query
+                .to_lowercase()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect();
+
     let include_matcher =
         build_glob_filter(&config.include_globs).map_err(CrawlError::InvalidStartUrl)?;
     let exclude_matcher =
@@ -238,6 +250,7 @@ pub async fn run_single(
             handles.push(tokio::spawn(process_lease(
                 config.clone(),
                 output_dir.clone(),
+                for_terms.clone(),
                 policy.clone(),
                 fetcher,
                 stop,
@@ -295,6 +308,7 @@ enum Outcome {
 async fn process_lease(
     config: Config,
     output_dir: std::path::PathBuf,
+    for_terms: Vec<Vec<String>>,
     policy: UrlPolicy,
     fetcher: Arc<Fetcher>,
     stop: Arc<AtomicBool>,
@@ -391,6 +405,7 @@ async fn process_lease(
                 &include_matcher,
                 &exclude_matcher,
                 &output_dir,
+                &for_terms,
             )
             .await
         }
@@ -430,6 +445,46 @@ async fn process_lease(
     }
 }
 
+/// Scores a page against any of the --for queries: title x10 per term,
+/// heading x4, body x1. Any-query match counts.
+pub fn relevance_score(title: &str, markdown: &str, for_terms: &[Vec<String>]) -> u64 {
+    if for_terms.is_empty() {
+        return 1; // no --for: everything relevant
+    }
+    let title_lower = title.to_lowercase();
+    let mut best = 0u64;
+    for terms in for_terms {
+        if terms.is_empty() {
+            continue;
+        }
+        // all terms of one query must appear somewhere
+        let body_lower = markdown.to_lowercase();
+        if !terms
+            .iter()
+            .all(|t| body_lower.contains(t.as_str()) || title_lower.contains(t.as_str()))
+        {
+            continue;
+        }
+        let mut score = 0u64;
+        for term in terms {
+            if title_lower.contains(term.as_str()) {
+                score += 10;
+            }
+        }
+        for line in markdown.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+            let hits = terms.iter().filter(|t| lower.contains(t.as_str())).count();
+            if hits == 0 {
+                continue;
+            }
+            score += if trimmed.starts_with('#') { 4 } else { 1 } * hits as u64;
+        }
+        best = best.max(score);
+    }
+    best
+}
+
 /// Handles a fetched (modified) page: extract, commit, admit links.
 #[allow(clippy::too_many_arguments)]
 async fn process_modified(
@@ -441,6 +496,7 @@ async fn process_modified(
     include_matcher: &GlobFilter,
     exclude_matcher: &GlobFilter,
     output_dir: &std::path::Path,
+    for_terms: &[Vec<String>],
 ) -> Outcome {
     let _ = state.store_validators(
         &lease.canonical_url,
@@ -456,7 +512,7 @@ async fn process_modified(
                 &lease,
                 "not_html",
                 "response was not valid UTF-8",
-                &output_dir,
+                output_dir,
             )
             .await;
         }
@@ -471,11 +527,45 @@ async fn process_modified(
                     &lease,
                     "extract_failed",
                     &e.to_string(),
-                    &output_dir,
+                    output_dir,
                 )
                 .await;
             }
         };
+    // Relevance gate: with --for, pages matching no query are skipped (but
+    // their links are still admitted unless --for-prune). Scoring mirrors
+    // the search subcommand: title x10, headings x4, body x1.
+    if !for_terms.is_empty() {
+        let score = relevance_score(&extracted.title, &extracted.markdown, for_terms);
+        if score == 0 {
+            if config.for_prune {
+                return Outcome::Skipped;
+            }
+            // still admit links for traversal
+            for link in &extracted.links {
+                if lease.depth + 1 > config.max_depth {
+                    break;
+                }
+                if let Ok(canonical_link) = policy.canonicalize(link) {
+                    if policy.contains(&canonical_link)
+                        && path_in_scope(canonical_link.as_str(), include_matcher, exclude_matcher)
+                    {
+                        let _ = state.admit(
+                            canonical_link.as_str(),
+                            lease.depth + 1,
+                            Some(&lease.canonical_url),
+                            Some("link"),
+                        );
+                    }
+                }
+            }
+            let now = crate::robots::unix_ms() as i64;
+            let _ = state.mark_skipped(lease.page_id, "irrelevant");
+            let _ = now;
+            return Outcome::Skipped;
+        }
+    }
+
     let document = build_document(&lease.canonical_url, &fetched.final_url, &extracted);
     let relative = crate::url_policy::output_path(&lease.canonical_url);
     let record = ManifestRecord::for_content(
@@ -488,7 +578,7 @@ async fn process_modified(
         extracted.description.clone(),
         document.as_bytes(),
     );
-    let output = match OutputRoot::setup(output_dir.clone()) {
+    let output = match OutputRoot::setup(output_dir) {
         Ok(o) => o,
         Err(_) => return Outcome::Failed,
     };
@@ -524,7 +614,7 @@ async fn process_modified(
 }
 
 async fn finish_error(
-    config: &Config,
+    _config: &Config,
     state: &StateStore,
     lease: &crate::state::Lease,
     kind: &str,
@@ -682,7 +772,7 @@ fn write_link_graph(output: &OutputRoot) -> Result<(), crate::output::OutputErro
 /// Writes `llms.txt` (per-page summary index) and `llms-full.txt`
 /// (whole corpus concatenated). llms-full is capped at 10k pages.
 fn write_llms_files(output: &OutputRoot) -> Result<(), crate::output::OutputError> {
-    let mut records = output.read_manifest()?;
+    let mut records: Vec<ManifestRecord> = output.read_manifest()?;
     if records.is_empty() {
         return Ok(());
     }
