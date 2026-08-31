@@ -416,7 +416,7 @@ fn fingerprint_of(start_url: &str, config: &Config) -> String {
 /// sorted by URL. Regenerated after every run (including resume no-ops).
 fn write_page_index(
     output: &OutputRoot,
-    state: &StateStore,
+    _state: &StateStore,
 ) -> Result<(), crate::output::OutputError> {
     let records = output.read_manifest()?;
     if records.is_empty() {
