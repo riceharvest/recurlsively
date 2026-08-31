@@ -13,7 +13,11 @@ fn help_is_a_successful_parse_outcome() {
 #[test]
 fn version_is_a_successful_parse_outcome() {
     let outcome = parse_from(["recurlsively", "--version"]).expect("version should parse");
-    assert!(matches!(outcome, ParseOutcome::Version(text) if text.contains("recurlsively 0.1.0")));
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(
+        matches!(outcome, ParseOutcome::Version(text) if text.contains(version)),
+        "version output must contain the crate version {version}"
+    );
 }
 
 #[test]
