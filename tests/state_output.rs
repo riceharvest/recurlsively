@@ -146,7 +146,10 @@ fn state_schema_is_versioned_and_counts_are_durable() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
     let state = StateStore::open(&path).unwrap();
-    assert_eq!(state.schema_version().unwrap(), 1);
+    assert_eq!(
+        state.schema_version().unwrap(),
+        recurlsively::state::SCHEMA_VERSION
+    );
     let page_id = state
         .admit_url("https://example.test/skip", 0, None, None)
         .unwrap()
