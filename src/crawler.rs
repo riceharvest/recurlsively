@@ -12,7 +12,7 @@ use crate::robots::{RobotsCache, RobotsOutcome};
 use crate::state::StateStore;
 use crate::url_policy::UrlPolicy;
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct CrawlReport {
     pub pages_written: u64,
     pub pages_failed: u64,
@@ -65,11 +65,59 @@ fn extraction_limits(config: &Config) -> ExtractLimits {
 }
 
 /// Runs one crawl to completion. Returns the final report.
-pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlError> {
-    if config.fresh {
-        let _ = std::fs::remove_dir_all(&config.output);
+pub async fn run(config: &Config, start_urls: &[String]) -> Result<Vec<UrlReport>, CrawlError> {
+    let mut reports = Vec::new();
+    if config.merge_outputs || start_urls.len() == 1 {
+        for url in start_urls {
+            let report = run_single(config, url, config.output.clone()).await?;
+            reports.push(UrlReport {
+                url: url.clone(),
+                report,
+            });
+        }
+    } else {
+        for url in start_urls {
+            let subdir = host_slug(url).ok_or_else(|| {
+                CrawlError::InvalidStartUrl(format!("cannot derive output directory from {url}"))
+            })?;
+            let mut out = config.output.clone();
+            out.push(subdir);
+            let report = run_single(config, url, out).await?;
+            reports.push(UrlReport {
+                url: url.clone(),
+                report,
+            });
+        }
     }
-    let output = OutputRoot::setup(&config.output)?;
+    Ok(reports)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UrlReport {
+    pub url: String,
+    pub report: CrawlReport,
+}
+
+fn host_slug(url: &str) -> Option<String> {
+    let parsed = url.parse::<url::Url>().ok()?;
+    let host = parsed.host_str()?;
+    let port = parsed.port();
+    let mut slug = host.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    if let Some(port) = port {
+        slug.push_str(&format!("_{port}"));
+    }
+    Some(slug)
+}
+
+pub async fn run_single(
+    config: &Config,
+    start_url: &str,
+    output_dir: std::path::PathBuf,
+) -> Result<CrawlReport, CrawlError> {
+    if config.fresh {
+        let _ = std::fs::remove_dir_all(&output_dir);
+    }
+    let output = OutputRoot::setup(&output_dir)?;
     let state = StateStore::open(output.state_path())?;
 
     let query_mode = match config.query_mode {
@@ -189,6 +237,7 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
             let stop = Arc::clone(&stop);
             handles.push(tokio::spawn(process_lease(
                 config.clone(),
+                output_dir.clone(),
                 policy.clone(),
                 fetcher,
                 stop,
@@ -245,6 +294,7 @@ enum Outcome {
 #[allow(clippy::too_many_arguments)]
 async fn process_lease(
     config: Config,
+    output_dir: std::path::PathBuf,
     policy: UrlPolicy,
     fetcher: Arc<Fetcher>,
     stop: Arc<AtomicBool>,
@@ -254,7 +304,7 @@ async fn process_lease(
     changed: Arc<AtomicU64>,
     unchanged: Arc<AtomicU64>,
 ) -> Outcome {
-    let state = match StateStore::open(lease_output_path(&config).join("state.sqlite")) {
+    let state = match StateStore::open(output_dir.clone().join("state.sqlite")) {
         Ok(s) => s,
         Err(_) => return Outcome::Failed,
     };
@@ -265,7 +315,15 @@ async fn process_lease(
     let _ = state.record_attempt(lease.page_id, &lease.lease_token, now);
 
     let Ok(parsed) = reqwest::Url::parse(&lease.canonical_url) else {
-        return finish_error(&config, &state, &lease, "invalid_url", "URL unparseable").await;
+        return finish_error(
+            &config,
+            &state,
+            &lease,
+            "invalid_url",
+            "URL unparseable",
+            &output_dir,
+        )
+        .await;
     };
     let path = parsed.path().to_owned();
     let origin_string = format!(
@@ -283,7 +341,15 @@ async fn process_lease(
             return Outcome::Skipped;
         }
         RobotsOutcome::FailClosed(message) => {
-            return finish_error(&config, &state, &lease, "robots_fetch_failed", &message).await;
+            return finish_error(
+                &config,
+                &state,
+                &lease,
+                "robots_fetch_failed",
+                &message,
+                &output_dir,
+            )
+            .await;
         }
         RobotsOutcome::NoRules | RobotsOutcome::Allowed(_) => {}
     }
@@ -324,6 +390,7 @@ async fn process_lease(
                 lease,
                 &include_matcher,
                 &exclude_matcher,
+                &output_dir,
             )
             .await
         }
@@ -355,6 +422,7 @@ async fn process_lease(
                     &lease,
                     "fetch_failed",
                     &fetch_error.to_string(),
+                    &output_dir,
                 )
                 .await
             }
@@ -372,6 +440,7 @@ async fn process_modified(
     lease: crate::state::Lease,
     include_matcher: &GlobFilter,
     exclude_matcher: &GlobFilter,
+    output_dir: &std::path::Path,
 ) -> Outcome {
     let _ = state.store_validators(
         &lease.canonical_url,
@@ -387,6 +456,7 @@ async fn process_modified(
                 &lease,
                 "not_html",
                 "response was not valid UTF-8",
+                &output_dir,
             )
             .await;
         }
@@ -395,8 +465,15 @@ async fn process_modified(
         match extract::extract_html(&html, &fetched.final_url, extraction_limits(&config)) {
             Ok(page) => page,
             Err(e) => {
-                return finish_error(&config, &state, &lease, "extract_failed", &e.to_string())
-                    .await;
+                return finish_error(
+                    &config,
+                    &state,
+                    &lease,
+                    "extract_failed",
+                    &e.to_string(),
+                    &output_dir,
+                )
+                .await;
             }
         };
     let document = build_document(&lease.canonical_url, &fetched.final_url, &extracted);
@@ -411,7 +488,7 @@ async fn process_modified(
         extracted.description.clone(),
         document.as_bytes(),
     );
-    let output = match OutputRoot::setup(lease_output_path(&config)) {
+    let output = match OutputRoot::setup(output_dir.clone()) {
         Ok(o) => o,
         Err(_) => return Outcome::Failed,
     };
@@ -452,10 +529,11 @@ async fn finish_error(
     lease: &crate::state::Lease,
     kind: &str,
     message: &str,
+    output_dir: &std::path::Path,
 ) -> Outcome {
     let now = crate::robots::unix_ms() as i64;
     let _ = state.mark_terminal_error(lease.page_id, &lease.lease_token, now, message);
-    let output = match OutputRoot::setup(lease_output_path(config)) {
+    let output = match OutputRoot::setup(output_dir) {
         Ok(o) => o,
         Err(_) => return Outcome::Failed,
     };
@@ -697,10 +775,6 @@ fn write_page_index(
     std::fs::write(&temp, document.as_bytes())?;
     std::fs::rename(&temp, &destination)?;
     Ok(())
-}
-
-fn lease_output_path(config: &Config) -> std::path::PathBuf {
-    config.output.clone()
 }
 
 /// Renders the final Markdown file: front matter, body, links appendix.

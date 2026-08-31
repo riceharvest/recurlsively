@@ -54,6 +54,13 @@ pub struct Config {
     pub allow_private_network: bool,
     pub fresh: bool,
     /// Path globs to include (None = allow all). Empty vec = no restriction.
+    /// One shared corpus across start URLs (vs per-URL subdirectories).
+    pub merge_outputs: bool,
+    /// Relevance queries: pages matching any are committed (skipped pages
+    /// still have links followed unless for_prune).
+    pub for_queries: Vec<String>,
+    /// Strict relevance: 0-score pages are not saved AND links not followed.
+    pub for_prune: bool,
     pub include_globs: Vec<String>,
     /// Path globs to exclude; checked after includes.
     pub exclude_globs: Vec<String>,
@@ -81,6 +88,9 @@ impl Default for Config {
             include_subdomains: false,
             allow_private_network: false,
             fresh: false,
+            merge_outputs: false,
+            for_queries: Vec::new(),
+            for_prune: false,
             include_globs: Vec::new(),
             exclude_globs: Vec::new(),
             report: ReportFormat::Text,

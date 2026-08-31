@@ -10,7 +10,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cli {
-    pub start_url: String,
+    pub start_urls: Vec<String>,
     pub config: Config,
 }
 
@@ -85,7 +85,7 @@ where
     let mut arguments = args.into_iter().map(Into::into);
     let _program = arguments.next();
     let mut config = Config::default();
-    let mut start_url = None;
+    let mut start_urls: Option<Vec<String>> = None;
     let mut command_seen = false;
     let mut positional_only = false;
 
@@ -99,7 +99,7 @@ where
         if !positional_only && argument == "--update" {
             return Ok(ParseOutcome::Update);
         }
-        if !positional_only && argument == "search" && start_url.is_none() {
+        if !positional_only && argument == "search" && start_urls.is_none() {
             // recurlsively search <dir> <query...> [--json]
             let directory = arguments
                 .next()
@@ -127,21 +127,27 @@ where
             positional_only = true;
             continue;
         }
-        if !positional_only && argument == "crawl" && !command_seen && start_url.is_none() {
+        if !positional_only && argument == "crawl" && !command_seen && start_urls.is_none() {
             command_seen = true;
             continue;
         }
         if !positional_only && argument.starts_with('-') {
             parse_option(&argument, &mut arguments, &mut config)?;
-        } else if start_url.replace(argument).is_some() {
-            return Err(CliError("only one START_URL may be provided".to_owned()));
+        } else {
+            start_urls.get_or_insert_with(Vec::new).push(argument);
         }
     }
 
-    let start_url = start_url.ok_or_else(|| CliError("missing START_URL".to_owned()))?;
-    validate_start_url(&start_url, config.allow_private_network)?;
+    let mut start_urls = start_urls.ok_or_else(|| CliError("missing START_URL".to_owned()))?;
+    if start_urls.len() > 1 && config.merge_outputs {
+        // cross-origin merge is fine; same-origin scope is per-URL below
+    }
+    for url in &start_urls {
+        validate_start_url(url, config.allow_private_network)?;
+    }
+    // Each URL gets its own origin scope unless --merge joins them into one corpus.
     config.validate()?;
-    Ok(ParseOutcome::Run(Cli { start_url, config }))
+    Ok(ParseOutcome::Run(Cli { start_urls, config }))
 }
 
 fn parse_option<I>(argument: &str, arguments: &mut I, config: &mut Config) -> Result<(), CliError>
@@ -183,6 +189,9 @@ where
         "--fresh" => set_boolean(name, inline, &mut config.fresh)?,
         "--include" => config.include_globs.push(value(name, inline, arguments)?),
         "--exclude" => config.exclude_globs.push(value(name, inline, arguments)?),
+        "--merge" => set_boolean(name, inline, &mut config.merge_outputs)?,
+        "--for" => config.for_queries.push(value(name, inline, arguments)?),
+        "--for-prune" => set_boolean(name, inline, &mut config.for_prune)?,
         _ => return Err(CliError(format!("unknown option `{argument}`"))),
     }
     Ok(())

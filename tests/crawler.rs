@@ -149,9 +149,11 @@ async fn crawl_engine_captures_linked_pages_and_records_dead_links() {
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
 
-    let report = crawler::run(&config, &start).await.expect("crawl succeeds");
-    assert_eq!(report.pages_written, 2, "home + /a written");
-    assert!(report.pages_failed >= 1, "dead link recorded");
+    let report = crawler::run(&config, &[start.clone()])
+        .await
+        .expect("crawl succeeds");
+    assert_eq!(report[0].report.pages_written, 2, "home + /a written");
+    assert!(report[0].report.pages_failed >= 1, "dead link recorded");
     assert!(output.join("manifest.jsonl").exists());
     assert!(output.join("errors.jsonl").exists());
     assert!(
@@ -186,9 +188,14 @@ async fn robots_disallow_is_respected() {
     ));
     let (mut config, start) = test_config(output.clone(), &fixture.url("/"));
     config.sitemap = SitemapMode::Off;
-    let report = crawler::run(&config, &start).await.expect("crawl succeeds");
-    assert_eq!(report.pages_written, 1);
-    assert!(report.pages_skipped >= 1, "robots-denied link skipped");
+    let report = crawler::run(&config, &[start.clone()])
+        .await
+        .expect("crawl succeeds");
+    assert_eq!(report[0].report.pages_written, 1);
+    assert!(
+        report[0].report.pages_skipped >= 1,
+        "robots-denied link skipped"
+    );
     assert!(!fixture.requested("/private/secret"));
     let _ = std::fs::remove_dir_all(&output);
 }
@@ -205,11 +212,11 @@ async fn body_limit_is_enforced_as_terminal_error() {
     ));
     let (mut config, start) = test_config(output, &fixture.url("/"));
     config.max_body_size = 1024;
-    let report = crawler::run(&config, &start)
+    let report = crawler::run(&config, &[start.clone()])
         .await
         .expect("crawl completes");
-    assert_eq!(report.pages_written, 0);
-    assert_eq!(report.pages_failed, 1);
+    assert_eq!(report[0].report.pages_written, 0);
+    assert_eq!(report[0].report.pages_failed, 1);
 }
 
 #[tokio::test]
@@ -230,10 +237,10 @@ async fn same_origin_redirect_is_followed_and_deduplicated() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output, &fixture.url("/start"));
-    let report = crawler::run(&config, &start)
+    let report = crawler::run(&config, &[start.clone()])
         .await
         .expect("crawl completes");
-    assert_eq!(report.pages_written, 1, "only /final written");
+    assert_eq!(report[0].report.pages_written, 1, "only /final written");
 }
 
 fn hash_of(url: &str) -> String {
@@ -254,14 +261,21 @@ async fn resume_of_completed_crawl_is_not_an_error() {
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
 
-    let first = crawler::run(&config, &start).await.expect("first run");
-    assert_eq!(first.pages_written, 1);
+    let first = crawler::run(&config, &[start.clone()])
+        .await
+        .expect("first run");
+    assert_eq!(first[0].report.pages_written, 1);
 
     // Second run: everything already written — must not count as failure.
-    let second = crawler::run(&config, &start).await.expect("resume run");
-    assert_eq!(second.pages_written, 0);
-    assert_eq!(second.pages_failed, 0);
-    assert_eq!(second.pages_pending, 0, "frontier must be drained");
+    let second = crawler::run(&config, &[start.clone()])
+        .await
+        .expect("resume run");
+    assert_eq!(second[0].report.pages_written, 0);
+    assert_eq!(second[0].report.pages_failed, 0);
+    assert_eq!(
+        second[0].report.pages_pending, 0,
+        "frontier must be drained"
+    );
     let _ = std::fs::remove_dir_all(&output);
 }
 
@@ -277,7 +291,9 @@ async fn crawl_writes_index_md_mapping_urls_to_files() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let _report = crawler::run(&config, &start).await.expect("crawl succeeds");
+    let _report = crawler::run(&config, &[start.clone()])
+        .await
+        .expect("crawl succeeds");
 
     let index = std::fs::read_to_string(output.join("index.md")).expect("index.md exists");
     assert!(
@@ -309,11 +325,11 @@ async fn robots_served_as_text_plain_does_not_fail_closed() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let report = crawler::run(&config, &start)
+    let report = crawler::run(&config, &[start.clone()])
         .await
         .expect("crawl must succeed");
     assert_eq!(
-        report.pages_written, 1,
+        report[0].report.pages_written, 1,
         "robots must not fail-closed on text/plain"
     );
     let _ = std::fs::remove_dir_all(&output);
@@ -332,12 +348,12 @@ async fn delayed_retries_are_awaited_not_abandoned() {
         fixture.addr.port()
     ));
     let (config, start) = test_config(output.clone(), &fixture.url("/"));
-    let report = crawler::run(&config, &start)
+    let report = crawler::run(&config, &[start.clone()])
         .await
         .expect("crawl completes");
-    assert_eq!(report.pages_written, 1);
+    assert_eq!(report[0].report.pages_written, 1);
     assert_eq!(
-        report.pages_pending, 0,
+        report[0].report.pages_pending, 0,
         "no page left behind in delayed state"
     );
     let _ = std::fs::remove_dir_all(&output);

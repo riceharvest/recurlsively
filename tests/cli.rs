@@ -28,7 +28,7 @@ fn crawl_subcommand_and_defaults_are_parsed() {
         panic!("expected a runnable CLI");
     };
 
-    assert_eq!(cli.start_url, "https://example.com/docs");
+    assert_eq!(cli.start_urls[0], "https://example.com/docs");
     assert_eq!(cli.config.output, PathBuf::from("./recurlsively-out"));
     assert_eq!(cli.config.max_depth, 3);
     assert_eq!(cli.config.max_pages, 1_000);
@@ -46,7 +46,9 @@ fn crawl_subcommand_and_defaults_are_parsed() {
 fn crawl_subcommand_is_optional() {
     let outcome =
         parse_from(["recurlsively", "https://example.com"]).expect("implicit crawl should parse");
-    assert!(matches!(outcome, ParseOutcome::Run(cli) if cli.start_url == "https://example.com"));
+    assert!(
+        matches!(outcome, ParseOutcome::Run(cli) if cli.start_urls[0] == "https://example.com")
+    );
 }
 
 #[test]

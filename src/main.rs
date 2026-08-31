@@ -60,31 +60,58 @@ fn main() -> ExitCode {
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            match runtime.block_on(crawler::run(&cli.config, &cli.start_url)) {
-                Ok(report) => {
+            match runtime.block_on(crawler::run(&cli.config, &cli.start_urls)) {
+                Ok(reports) => {
+                    let sum = |field: fn(&recurlsively::crawler::CrawlReport) -> u64| -> u64 {
+                        reports.iter().map(|r| field(&r.report)).sum()
+                    };
+                    let truncated = reports.iter().any(|r| r.report.truncated);
+                    let failed = sum(|r| r.pages_failed);
+                    let pending = sum(|r| r.pages_pending);
+                    let written = sum(|r| r.pages_written);
                     match cli.config.report {
-                        ReportFormat::Json => println!(
-                            "{{\"pages_written\":{},\"pages_failed\":{},\"pages_skipped\":{},\"pages_pending\":{},\"truncated\":{}}}",
-                            report.pages_written,
-                            report.pages_failed,
-                            report.pages_skipped,
-                            report.pages_pending,
-                            report.truncated
-                        ),
-                        ReportFormat::Text => println!(
-                            "written: {} failed: {} skipped: {} pending: {} truncated: {}",
-                            report.pages_written,
-                            report.pages_failed,
-                            report.pages_skipped,
-                            report.pages_pending,
-                            report.truncated
-                        ),
+                        ReportFormat::Json => {
+                            let mut entries = Vec::new();
+                            for r in &reports {
+                                entries.push(serde_json::json!({
+                                    "url": r.url,
+                                    "pages_written": r.report.pages_written,
+                                    "pages_failed": r.report.pages_failed,
+                                    "pages_skipped": r.report.pages_skipped,
+                                    "pages_pending": r.report.pages_pending,
+                                    "changed": r.report.changed,
+                                    "unchanged": r.report.unchanged,
+                                    "truncated": r.report.truncated,
+                                }));
+                            }
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "urls": entries,
+                                    "totals": {
+                                        "pages_written": written,
+                                        "pages_failed": failed,
+                                        "pages_pending": pending,
+                                        "truncated": truncated,
+                                    }
+                                })
+                            );
+                        }
+                        ReportFormat::Text => {
+                            for r in &reports {
+                                println!(
+                                    "{}: written {} failed {} skipped {} pending {} truncated {}",
+                                    r.url,
+                                    r.report.pages_written,
+                                    r.report.pages_failed,
+                                    r.report.pages_skipped,
+                                    r.report.pages_pending,
+                                    r.report.truncated
+                                );
+                            }
+                        }
                     }
-                    // exit 0 on clean runs including resume no-ops (nothing failed, nothing pending)
-                    if report.truncated
-                        || report.pages_pending > 0
-                        || (report.pages_written == 0 && report.pages_failed > 0)
-                    {
+                    if truncated || pending > 0 || (written == 0 && failed > 0) {
                         ExitCode::from(1)
                     } else {
                         ExitCode::SUCCESS
