@@ -132,7 +132,7 @@ pub async fn run_single(
     )
     .map_err(|e| CrawlError::InvalidStartUrl(e.to_string()))?;
 
-    let fingerprint = fingerprint_of(start_url, config);
+    let fingerprint = fingerprint_of(config);
     if let Some(previous) = state.config_fingerprint().map_err(CrawlError::State)? {
         if previous != fingerprint {
             return Err(CrawlError::State(
@@ -640,11 +640,10 @@ async fn finish_error(
 
 /// Deterministic, version-tolerant config fingerprint without serializing
 /// the whole Config (keeps StateStore's Serialize bound simple).
-fn fingerprint_of(start_url: &str, config: &Config) -> String {
+fn fingerprint_of(config: &Config) -> String {
     use sha2::{Digest, Sha256};
     let mut material = String::with_capacity(256);
-    material.push_str("v1|");
-    material.push_str(start_url);
+    material.push_str("v2|");
     material.push('|');
     material.push_str(&config.output.display().to_string());
     for value in [
