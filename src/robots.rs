@@ -87,7 +87,7 @@ impl RobotsCache {
         }
         if !self.cache.contains_key(origin) {
             match fetcher
-                .get(&format!("{origin}/robots.txt"), ROBOTS_MAX_BODY)
+                .get_raw(&format!("{origin}/robots.txt"), ROBOTS_MAX_BODY)
                 .await
             {
                 Ok(fetched) => {

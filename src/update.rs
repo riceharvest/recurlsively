@@ -109,7 +109,12 @@ fn extract_zip(archive: &[u8], directory: &std::path::Path) -> Result<(), Update
             e.to_string(),
         ))
     })?;
-    zip.extract(directory).map_err(UpdateError::Io)
+    zip.extract(directory).map_err(|e| {
+        UpdateError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            e.to_string(),
+        ))
+    })
 }
 
 /// Runs `recurlsively update` and returns a human-readable report line.

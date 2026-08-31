@@ -287,3 +287,34 @@ async fn crawl_writes_index_md_mapping_urls_to_files() {
     assert!(index.contains(".md"), "file paths listed");
     let _ = std::fs::remove_dir_all(&output);
 }
+
+#[tokio::test]
+async fn robots_served_as_text_plain_does_not_fail_closed() {
+    let mut routes = HashMap::new();
+    routes.insert(
+        "/robots.txt".to_owned(),
+        (
+            200,
+            vec![
+                ("Content-Type", "text/plain; charset=utf-8".to_owned()),
+                ("body", "User-agent: *\nDisallow: /none\n".to_owned()),
+            ],
+        ),
+    );
+    routes.insert("/".to_owned(), (200, vec![("body", page("plain", &[]))]));
+    let fixture = Fixture::start(routes);
+    let output = std::env::temp_dir().join(format!(
+        "recurlsively-robotsplain-{}-{}",
+        std::process::id(),
+        fixture.addr.port()
+    ));
+    let (config, start) = test_config(output.clone(), &fixture.url("/"));
+    let report = crawler::run(&config, &start)
+        .await
+        .expect("crawl must succeed");
+    assert_eq!(
+        report.pages_written, 1,
+        "robots must not fail-closed on text/plain"
+    );
+    let _ = std::fs::remove_dir_all(&output);
+}

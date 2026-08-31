@@ -12,7 +12,7 @@ pub async fn discover_sitemaps(fetcher: &Fetcher, origin: &str) -> Vec<String> {
     let mut candidates = Vec::new();
     // robots.txt Sitemap: lines were parsed into the robots fetch; probe here.
     let robots = fetcher
-        .get(&format!("{origin}/robots.txt"), 500 * 1024)
+        .get_raw(&format!("{origin}/robots.txt"), 500 * 1024)
         .await;
     if let Ok(fetched) = robots {
         let text = String::from_utf8_lossy(&fetched.body);
@@ -37,7 +37,7 @@ pub async fn load_sitemap(
     origin: &str,
 ) -> Result<Vec<String>, String> {
     let fetched = fetcher
-        .get(sitemap_url, SITEMAP_MAX_BODY)
+        .get_raw(sitemap_url, SITEMAP_MAX_BODY)
         .await
         .map_err(|e| format!("sitemap fetch failed: {e}"))?;
     let text = String::from_utf8_lossy(&fetched.body).into_owned();
@@ -52,7 +52,7 @@ pub async fn load_sitemap(
             if !same_origin_url(child, origin) {
                 continue;
             }
-            if let Ok(child_fetched) = fetcher.get(child, SITEMAP_MAX_BODY).await {
+            if let Ok(child_fetched) = fetcher.get_raw(child, SITEMAP_MAX_BODY).await {
                 let child_text = String::from_utf8_lossy(&child_fetched.body);
                 for url in extract_loc_tags(&child_text) {
                     if out.len() >= SITEMAP_MAX_URLS {

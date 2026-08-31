@@ -126,8 +126,23 @@ impl Fetcher {
         }
     }
 
+    /// Like [`get`](Self::get) but accepts any content type — for
+    /// auxiliary documents such as robots.txt and sitemaps.
+    pub async fn get_raw(&self, url: &str, max_body: u64) -> Result<Fetched, FetchError> {
+        self.fetch_following_redirects(url, max_body, true).await
+    }
+
     /// Fetches `url` following at most [`MAX_REDIRECT_HOPS`] same-origin hops.
     pub async fn get(&self, url: &str, max_body: u64) -> Result<Fetched, FetchError> {
+        self.fetch_following_redirects(url, max_body, false).await
+    }
+
+    async fn fetch_following_redirects(
+        &self,
+        url: &str,
+        max_body: u64,
+        accept_any_content_type: bool,
+    ) -> Result<Fetched, FetchError> {
         let mut current: reqwest::Url = url
             .parse()
             .map_err(|e| FetchError::Network(format!("invalid url {url}: {e}")))?;
@@ -181,7 +196,7 @@ impl Fetcher {
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
-            if !looks_like_html(&content_type) {
+            if !accept_any_content_type && !looks_like_html(&content_type) {
                 return Err(FetchError::NotHtml {
                     status,
                     content_type,
