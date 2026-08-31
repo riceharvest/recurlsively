@@ -16,7 +16,10 @@ const FALLBACK_INSTALL_DIR: &str = ".local/bin";
 pub enum UpdateError {
     Network(String),
     NoAsset(String),
-    Checksum { expected: String, actual: String },
+    Checksum {
+        expected: String,
+        actual: String,
+    },
     Io(std::io::Error),
     /// Already running the latest version.
     UpToDate(String),
@@ -101,10 +104,12 @@ fn extract_tarball(archive: &[u8], directory: &std::path::Path) -> Result<(), Up
 #[cfg(target_os = "windows")]
 fn extract_zip(archive: &[u8], directory: &std::path::Path) -> Result<(), UpdateError> {
     let reader = std::io::Cursor::new(archive);
-    let mut zip = zip::ZipArchive::new(reader).map_err(|e| UpdateError::Io(std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        e.to_string(),
-    )))?;
+    let mut zip = zip::ZipArchive::new(reader).map_err(|e| {
+        UpdateError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            e.to_string(),
+        ))
+    })?;
     zip.extract(directory).map_err(UpdateError::Io)
 }
 
@@ -115,7 +120,9 @@ pub async fn run_update() -> Result<String, UpdateError> {
 
     let http = client()?;
     let release: LatestRelease = http
-        .get(&format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .get(&format!(
+            "https://api.github.com/repos/{REPO}/releases/latest"
+        ))
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
