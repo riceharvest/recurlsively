@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use crate::resolver::SafeResolver;
 
 const REPO: &str = "riceharvest/recurlsively";
-const FALLBACK_INSTALL_DIR: &str = ".local/bin";
 
 #[derive(Debug)]
 pub enum UpdateError {
@@ -120,7 +119,7 @@ pub async fn run_update() -> Result<String, UpdateError> {
 
     let http = client()?;
     let release: LatestRelease = http
-        .get(&format!(
+        .get(format!(
             "https://api.github.com/repos/{REPO}/releases/latest"
         ))
         .header("X-GitHub-Api-Version", "2022-11-28")
