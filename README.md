@@ -20,7 +20,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.ps1 | iex
 ```
 
-Already installed? Self-update from the latest release (v0.1.2+):
+Already installed? Self-update from the latest release (v0.1.2+; first run after v0.1.2):
 
 ```sh
 recurlsively --update
@@ -60,6 +60,8 @@ Key options (see `--help` for all):
 | `--ignore-robots` | off | bypass robots.txt (your responsibility) |
 | `--allow-private-network` | off | allow localhost/private IPs (trusted targets only) |
 | `--fresh` | off | wipe prior output state and start over |
+| `--include <glob>` | off | only crawl paths matching the glob (repeatable) |
+| `--exclude <glob>` | off | skip paths matching the glob (repeatable) |
 | `--report` | `text` | final summary: `text` or `json` on stdout |
 | `--progress` | `auto` | stderr progress: `auto`, `text`, `json`, `none` |
 | `--update` | — | self-update from GitHub Releases (checksum-verified) |
@@ -69,11 +71,30 @@ Key options (see `--help` for all):
 ```
 recurlsively-out/
 ├── index.md           # sorted map: [url](pages/xxx.md) (depth) — start here
+├── llms.txt           # per-page summary index in llms.txt format
+├── llms-full.txt      # whole corpus concatenated (up to 10k pages)
+├── graph.jsonl        # link graph: {url, inbound, outbound} per page
 ├── pages/<sha256>.md  # one Markdown file per page, YAML front matter
 ├── manifest.jsonl     # one JSON line per written page (url, depth, digest, path)
 ├── errors.jsonl       # one JSON line per terminal failure with a reason
 └── state.sqlite       # durable frontier; re-running the same command resumes
 ```
+
+### Search the corpus
+
+```bash
+recurlsively search ./docs-snap "rate limits"
+recurlsively search ./docs-snap "rate limits" --json
+```
+
+Title matches rank 10x, headings 4x, body 1x. All query terms must appear.
+Hit lines include `file:line` so follow-up greps are one copy-paste away.
+
+### Re-crawls are cheap
+
+Pages store `etag`/`last_modified` validators. Re-running a crawl re-downloads
+only pages whose content changed — unchanged pages are confirmed with zero
+body transfer, and the JSON report shows `changed`/`unchanged` counts.
 
 Every Markdown file carries front matter with `url`, `final_url`, and
 `title`, and ends with exactly one newline. Treat the content as untrusted
