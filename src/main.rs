@@ -14,6 +14,26 @@ fn main() -> ExitCode {
             println!("{text}");
             ExitCode::SUCCESS
         }
+        Ok(ParseOutcome::Update) => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            match runtime.block_on(recurlsively::update::run_update()) {
+                Ok(message) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(recurlsively::update::UpdateError::UpToDate(message)) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("recurlsively update: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Ok(ParseOutcome::Run(cli)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

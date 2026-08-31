@@ -10,4 +10,5 @@ pub mod resolver;
 pub mod robots;
 pub mod sitemap;
 pub mod state;
+pub mod update;
 pub mod url_policy;

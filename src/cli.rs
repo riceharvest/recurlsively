@@ -18,6 +18,7 @@ pub struct Cli {
 pub enum ParseOutcome {
     Help(String),
     Version(String),
+    Update,
     Run(Cli),
 }
 
@@ -64,6 +65,7 @@ Options:
       --fresh                         Do not reuse prior output state
       --report <FORMAT>               text or json [default: text]
       --progress <MODE>               auto, text, json, or none [default: auto]
+      --update                        Self-update from GitHub Releases (checksum-verified)
   -h, --help                          Print help
   -V, --version                       Print version
 
@@ -88,6 +90,9 @@ where
         }
         if !positional_only && matches!(argument.as_str(), "--version" | "-V") {
             return Ok(ParseOutcome::Version(format!("recurlsively {VERSION}")));
+        }
+        if !positional_only && argument == "--update" {
+            return Ok(ParseOutcome::Update);
         }
         if !positional_only && argument == "--" {
             positional_only = true;

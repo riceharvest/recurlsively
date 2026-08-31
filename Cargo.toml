@@ -1,6 +1,6 @@
 [package]
 name = "recurlsively"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A secure-by-default deterministic Markdown snapshotter for AI agents."
 license = "MIT OR Apache-2.0"
@@ -27,8 +27,13 @@ sha2 = "0.10"
 url = "2.5.8"
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "http2", "json"] }
 signal-hook = "0.3"
+flate2 = "1"
+tar = "0.4"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"
