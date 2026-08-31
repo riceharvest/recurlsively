@@ -607,6 +607,17 @@ impl StateStore {
         Ok(changed as u64)
     }
 
+    /// Minimum `next_eligible_at` across delayed pages, or 0 when none.
+    pub fn earliest_next_eligible_at(&self) -> Result<i64, StateError> {
+        let connection = self.lock()?;
+        let earliest: Option<i64> = connection.query_row(
+            "SELECT MIN(next_eligible_at) FROM pages WHERE state = 'delayed'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(earliest.unwrap_or(0))
+    }
+
     pub fn counts(&self) -> Result<StateCounts, StateError> {
         let connection = self.lock()?;
         let mut counts = StateCounts::default();

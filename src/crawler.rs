@@ -154,6 +154,20 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
             )
             .map_err(CrawlError::State)?;
         if leases.is_empty() {
+            // Frontier is drained only when nothing is queued AND nothing is
+            // waiting on a retry timer. Delayed pages must be awaited, not
+            // abandoned — otherwise a 429 with Retry-After never gets its
+            // retry within the same run.
+            let counts = state.counts().map_err(CrawlError::State)?;
+            if counts.queued == 0 && counts.delayed > 0 {
+                let earliest = state
+                    .earliest_next_eligible_at()
+                    .map_err(CrawlError::State)?;
+                let now = crate::robots::unix_ms() as i64;
+                let wait = (earliest.saturating_sub(now)).clamp(0, 5_000) as u64;
+                tokio::time::sleep(std::time::Duration::from_millis(wait.max(50))).await;
+                continue;
+            }
             break; // frontier drained
         }
         let mut handles = Vec::with_capacity(leases.len());
