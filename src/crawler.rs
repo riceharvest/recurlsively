@@ -187,14 +187,18 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
         }
     }
 
+    // Rebuild the URL -> file index so agents can map pages without parsing JSONL.
+    write_page_index(&output, &state).map_err(CrawlError::Output)?;
+
     let counts = state.counts().map_err(CrawlError::State)?;
-    Ok(CrawlReport {
+    let report = CrawlReport {
         pages_written: written.load(Ordering::SeqCst),
         pages_failed: failed.load(Ordering::SeqCst),
         pages_skipped: skipped.load(Ordering::SeqCst),
         pages_pending: counts.queued + counts.delayed + counts.leased,
         truncated: state.page_count().map_err(CrawlError::State)? as usize >= config.max_pages,
-    })
+    };
+    Ok(report)
 }
 
 enum Outcome {
@@ -406,6 +410,41 @@ fn fingerprint_of(start_url: &str, config: &Config) -> String {
     }
     let digest = Sha256::digest(material.as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Writes `index.md`: one line per written page, `url -> pages/xxx.md`,
+/// sorted by URL. Regenerated after every run (including resume no-ops).
+fn write_page_index(
+    output: &OutputRoot,
+    state: &StateStore,
+) -> Result<(), crate::output::OutputError> {
+    let records = output.read_manifest()?;
+    if records.is_empty() {
+        return Ok(());
+    }
+    let mut lines: Vec<(String, &str, u32)> = records
+        .iter()
+        .map(|record| {
+            (
+                record.canonical_url.clone(),
+                record.output_path.as_str(),
+                record.depth,
+            )
+        })
+        .collect();
+    lines.sort();
+    let mut document = String::with_capacity(records.len() * 96);
+    document.push_str("# Crawl index\n\n");
+    document.push_str("One line per page: `[url](file)` (depth).\n\n");
+    for (url, path, depth) in lines {
+        document.push_str(&format!("- [{url}]({path}) ({depth})\n"));
+    }
+    // index.md lives at the corpus root; pages are relative to it.
+    let destination = output.root().join("index.md");
+    let temp = output.root().join(".index.md.tmp");
+    std::fs::write(&temp, document.as_bytes())?;
+    std::fs::rename(&temp, &destination)?;
+    Ok(())
 }
 
 fn lease_output_path(config: &Config) -> std::path::PathBuf {

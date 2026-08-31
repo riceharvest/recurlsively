@@ -188,11 +188,26 @@ fn find_title(document: &Html) -> String {
 }
 
 fn select_content(document: &Html) -> ElementRef<'_> {
-    for selector_text in ["main", "article", "body"] {
-        let selector = Selector::parse(selector_text).expect("static content selector is valid");
-        if let Some(element) = document.select(&selector).next() {
-            return element;
-        }
+    // "main" wins outright.
+    if let Some(element) = document
+        .select(&Selector::parse("main").expect("valid selector"))
+        .next()
+    {
+        return element;
+    }
+    // A lone <article> is the page; listing pages put one <article> per card,
+    // so multiple articles mean the content root is <body> — selecting the
+    // first card would silently drop every other item and its links.
+    let article_selector = Selector::parse("article").expect("valid selector");
+    let mut articles = document.select(&article_selector);
+    if let (Some(first), None) = (articles.next(), articles.next()) {
+        return first;
+    }
+    if let Some(element) = document
+        .select(&Selector::parse("body").expect("valid selector"))
+        .next()
+    {
+        return element;
     }
     document.root_element()
 }
@@ -414,6 +429,38 @@ mod tests {
             max_body_bytes: 100_000,
             max_output_bytes: 100_000,
             max_links: 100,
+        }
+    }
+
+    #[test]
+    fn multiple_articles_select_body_not_first_card() {
+        // Real-world pattern: listing pages use one <article> per item card.
+        // Selecting the first article would silently drop everything else.
+        let html = r#"
+            <html><head><title>List</title></head>
+            <body>
+              <h1>Product listing</h1>
+              <article><h2><a href="/one">One</a></h2><p>first card</p></article>
+              <article><h2><a href="/two">Two</a></h2><p>second card</p></article>
+              <article><h2><a href="/three">Three</a></h2><p>third card</p></article>
+              <nav>sidebar</nav>
+            </body></html>
+        "#;
+
+        let page = extract_html(html, BASE, limits()).expect("HTML should extract");
+
+        assert!(
+            page.markdown.contains("Product listing"),
+            "body heading kept"
+        );
+        for marker in ["first card", "second card", "third card"] {
+            assert!(page.markdown.contains(marker), "missing {marker}");
+        }
+        for url in ["/one", "/two", "/three"] {
+            assert!(
+                page.links.iter().any(|l| l.ends_with(url)),
+                "missing link {url}"
+            );
         }
     }
 

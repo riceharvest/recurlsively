@@ -39,7 +39,11 @@ fn main() -> ExitCode {
                             report.truncated
                         ),
                     }
-                    if report.truncated || report.pages_failed > 0 || report.pages_written == 0 {
+                    // exit 0 on clean runs including resume no-ops (nothing failed, nothing pending)
+                    if report.truncated
+                        || report.pages_pending > 0
+                        || (report.pages_written == 0 && report.pages_failed > 0)
+                    {
                         ExitCode::from(1)
                     } else {
                         ExitCode::SUCCESS

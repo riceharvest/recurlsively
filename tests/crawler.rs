@@ -241,3 +241,49 @@ fn hash_of(url: &str) -> String {
     let digest = Sha256::digest(url.as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+#[tokio::test]
+async fn resume_of_completed_crawl_is_not_an_error() {
+    let mut routes = HashMap::new();
+    routes.insert("/".to_owned(), (200, vec![("body", page("solo", &[]))]));
+    let fixture = Fixture::start(routes);
+    let output = std::env::temp_dir().join(format!(
+        "recurlsively-resume-{}-{}",
+        std::process::id(),
+        fixture.addr.port()
+    ));
+    let (config, start) = test_config(output.clone(), &fixture.url("/"));
+
+    let first = crawler::run(&config, &start).await.expect("first run");
+    assert_eq!(first.pages_written, 1);
+
+    // Second run: everything already written — must not count as failure.
+    let second = crawler::run(&config, &start).await.expect("resume run");
+    assert_eq!(second.pages_written, 0);
+    assert_eq!(second.pages_failed, 0);
+    assert_eq!(second.pages_pending, 0, "frontier must be drained");
+    let _ = std::fs::remove_dir_all(&output);
+}
+
+#[tokio::test]
+async fn crawl_writes_index_md_mapping_urls_to_files() {
+    let mut routes = HashMap::new();
+    routes.insert("/".to_owned(), (200, vec![("body", page("home", &["/a"]))]));
+    routes.insert("/a".to_owned(), (200, vec![("body", page("alpha", &[]))]));
+    let fixture = Fixture::start(routes);
+    let output = std::env::temp_dir().join(format!(
+        "recurlsively-index-{}-{}",
+        std::process::id(),
+        fixture.addr.port()
+    ));
+    let (config, start) = test_config(output.clone(), &fixture.url("/"));
+    let _report = crawler::run(&config, &start).await.expect("crawl succeeds");
+
+    let index = std::fs::read_to_string(output.join("index.md")).expect("index.md exists");
+    assert!(
+        index.contains(fixture.url("/").as_str()),
+        "start url listed"
+    );
+    assert!(index.contains(".md"), "file paths listed");
+    let _ = std::fs::remove_dir_all(&output);
+}
