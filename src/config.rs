@@ -53,6 +53,10 @@ pub struct Config {
     pub include_subdomains: bool,
     pub allow_private_network: bool,
     pub fresh: bool,
+    /// Path globs to include (None = allow all). Empty vec = no restriction.
+    pub include_globs: Vec<String>,
+    /// Path globs to exclude; checked after includes.
+    pub exclude_globs: Vec<String>,
     pub report: ReportFormat,
     pub progress: ProgressMode,
 }
@@ -77,6 +81,8 @@ impl Default for Config {
             include_subdomains: false,
             allow_private_network: false,
             fresh: false,
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
             report: ReportFormat::Text,
             progress: ProgressMode::Auto,
         }

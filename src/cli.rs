@@ -152,6 +152,8 @@ where
         "--include-subdomains" => set_boolean(name, inline, &mut config.include_subdomains)?,
         "--allow-private-network" => set_boolean(name, inline, &mut config.allow_private_network)?,
         "--fresh" => set_boolean(name, inline, &mut config.fresh)?,
+        "--include" => config.include_globs.push(value(name, inline, arguments)?),
+        "--exclude" => config.exclude_globs.push(value(name, inline, arguments)?),
         _ => return Err(CliError(format!("unknown option `{argument}`"))),
     }
     Ok(())

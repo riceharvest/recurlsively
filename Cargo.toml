@@ -29,6 +29,7 @@ url = "2.5.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "http2", "json"] }
 signal-hook = "0.3"
+globset = "0.4"
 flate2 = "1"
 tar = "0.4"
 

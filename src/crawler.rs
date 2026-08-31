@@ -129,6 +129,13 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
         }
     }
 
+    let include_matcher =
+        build_glob_filter(&config.include_globs).map_err(CrawlError::InvalidStartUrl)?;
+    let exclude_matcher =
+        build_glob_filter(&config.exclude_globs).map_err(CrawlError::InvalidStartUrl)?;
+    let include_matcher: GlobFilter = include_matcher;
+    let exclude_matcher: GlobFilter = exclude_matcher;
+
     let stop = Arc::new(AtomicBool::new(false));
     let sigint_stop = Arc::clone(&stop);
     std::thread::spawn(move || {
@@ -179,6 +186,8 @@ pub async fn run(config: &Config, start_url: &str) -> Result<CrawlReport, CrawlE
                 policy.clone(),
                 fetcher,
                 stop,
+                include_matcher.clone(),
+                exclude_matcher.clone(),
                 lease,
             )));
         }
@@ -227,6 +236,8 @@ async fn process_lease(
     policy: UrlPolicy,
     fetcher: Arc<Fetcher>,
     stop: Arc<AtomicBool>,
+    include_matcher: GlobFilter,
+    exclude_matcher: GlobFilter,
     lease: crate::state::Lease,
 ) -> Outcome {
     let state = match StateStore::open(lease_output_path(&config).join("state.sqlite")) {
@@ -323,7 +334,13 @@ async fn process_lease(
                     break; // deeper links would all exceed the depth budget
                 }
                 if let Ok(canonical_link) = policy.canonicalize(link) {
-                    if policy.contains(&canonical_link) {
+                    if policy.contains(&canonical_link)
+                        && path_in_scope(
+                            canonical_link.as_str(),
+                            &include_matcher,
+                            &exclude_matcher,
+                        )
+                    {
                         let _ = state.admit(
                             canonical_link.as_str(),
                             lease.depth + 1,
@@ -430,6 +447,46 @@ fn fingerprint_of(start_url: &str, config: &Config) -> String {
 
 /// Writes `index.md`: one line per written page, `url -> pages/xxx.md`,
 /// sorted by URL. Regenerated after every run (including resume no-ops).
+type GlobFilter = Option<std::sync::Arc<globset::GlobSet>>;
+
+fn build_glob_filter(globs: &[String]) -> Result<GlobFilter, String> {
+    if globs.is_empty() {
+        return Ok(None);
+    }
+    let mut builder = globset::GlobSet::builder();
+    for pattern in globs {
+        // A pattern like "/docs/**" should anchor to the path root; a bare
+        // "admin" should match anywhere. Try as-given, then path-agnostic.
+        let glob = globset::Glob::new(pattern)
+            .or_else(|_| globset::Glob::new(&format!("**/{pattern}")))
+            .map_err(|e| format!("invalid glob `{pattern}`: {e}"))?;
+        builder.add(glob);
+    }
+    let set = builder
+        .build()
+        .map_err(|e| format!("failed to build glob set: {e}"))?;
+    Ok(Some(std::sync::Arc::new(set)))
+}
+
+/// True when `url`'s path passes include/exclude filters.
+fn path_in_scope(url: &str, include: &GlobFilter, exclude: &GlobFilter) -> bool {
+    let path = url
+        .parse::<url::Url>()
+        .map(|parsed| parsed.path().to_owned())
+        .unwrap_or_default();
+    if let Some(matcher) = include {
+        if !matcher.is_match(&path) {
+            return false;
+        }
+    }
+    if let Some(matcher) = exclude {
+        if matcher.is_match(&path) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Writes `llms.txt` (per-page summary index) and `llms-full.txt`
 /// (whole corpus concatenated). llms-full is capped at 10k pages.
 fn write_llms_files(output: &OutputRoot) -> Result<(), crate::output::OutputError> {
